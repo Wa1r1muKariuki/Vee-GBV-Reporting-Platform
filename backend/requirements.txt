@@ -1,13 +1,26 @@
-fastapi
-uvicorn
+# Web Framework
+fastapi==0.104.1
+uvicorn==0.24.0
+
+# Database
 sqlalchemy<1.5
-httpx
-pydantic
-cryptography
-python-dotenv
-slowapi
-limits
 databases
-packaging<21
+psycopg2-binary==2.9.9
+
+# HTTP & API
+httpx==0.25.2
+slowapi==0.1.9
+limits==3.6.1
+
+# Security & Cryptography
+cryptography==41.0.7
+
+# Translation
 googletrans==4.0.0rc1
-cachetools
+
+# Caching
+cachetools==5.3.1
+
+# Environment & Utilities
+python-dotenv==1.0.0
+packaging<21
