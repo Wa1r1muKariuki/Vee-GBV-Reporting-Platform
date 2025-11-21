@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+sqlalchemy<1.5
+httpx
+pydantic
+cryptography
+python-dotenv
+slowapi
+limits
+databases
+packaging<21
+googletrans==4.0.0rc1
+cachetools

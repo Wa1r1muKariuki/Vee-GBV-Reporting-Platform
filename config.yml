@@ -1,0 +1,84 @@
+version: "3.1"
+language: en
+recipe: default.v1
+
+pipeline:
+  # Use spaCy for better tokenization and entity recognition
+- name: SpacyNLP
+  model: "en_core_web_md"    # Medium model for better accuracy
+- name: SpacyTokenizer
+
+- name: SpacyFeaturizer
+  pooling: mean
+
+- name: SpacyEntityExtractor
+  dimensions: ["PERSON", "DATE", "GPE", "ORG", "TIME"]
+  # Regex for Kenyan counties and patterns
+- name: RegexFeaturizer
+  case_sensitive: false
+
+- name: RegexEntityExtractor
+  case_sensitive: false
+  use_lookup_tables: true
+  use_regexes: true
+
+  # Lexical features
+- name: LexicalSyntacticFeaturizer
+
+  # Character n-grams for typo tolerance
+- name: CountVectorsFeaturizer
+  analyzer: char_wb
+  min_ngram: 1
+  max_ngram: 4
+
+  # Word-level features
+- name: CountVectorsFeaturizer
+  analyzer: word
+  min_ngram: 1
+  max_ngram: 2
+
+  # Intent classification with semantic understanding
+- name: DIETClassifier
+  epochs: 200
+  constrain_similarities: true
+  model_confidence: softmax
+  embedding_dimension: 256
+  number_of_transformer_layers: 2
+  transformer_size: 256
+  use_masked_language_model: true
+
+  # Entity extraction
+- name: EntitySynonymMapper
+
+  # Response selection
+- name: ResponseSelector
+  epochs: 50
+  constrain_similarities: true
+  retrieval_intent: "chitchat"
+
+  # Fallback with confidence threshold
+- name: FallbackClassifier
+  threshold: 0.6
+  ambiguity_threshold: 0.1
+
+policies:
+- name: RulePolicy
+  core_fallback_threshold: 0.3
+  core_fallback_action_name: "action_default_fallback"
+  enable_fallback_prediction: true
+  restrict_rules: true
+  check_for_contradictions: true
+
+- name: MemoizationPolicy
+  max_history: 3
+
+- name: TEDPolicy
+  max_history: 5
+  epochs: 50
+  constrain_similarities: true
+  model_confidence: softmax
+
+session_config:
+  session_expiration_time: 60
+  carry_over_slots_to_new_session: true
+assistant_id: 20251119-111451-relaxed-adaptation
