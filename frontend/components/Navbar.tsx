@@ -10,6 +10,12 @@ export default function Navbar() {
       {/* 🌙 Floating Nav Container */}
       <nav className="bg-black/60 backdrop-blur-lg border border-white/10 rounded-full px-10 py-3 shadow-lg flex items-center justify-center space-x-10 text-white">
         <Link
+          href="/"
+          className="hover:text-teal-300 transition duration-200 text-sm font-medium tracking-wide"
+        >
+          Home
+        </Link>
+        <Link
           href="/about"
           className="hover:text-teal-300 transition duration-200 text-sm font-medium tracking-wide"
         >
@@ -20,12 +26,6 @@ export default function Navbar() {
           className="hover:text-teal-300 transition duration-200 text-sm font-medium tracking-wide"
         >
           Map Insights
-        </Link>
-        <Link
-          href="/resources"
-          className="hover:text-teal-300 transition duration-200 text-sm font-medium tracking-wide"
-        >
-          Resources
         </Link>
       </nav>
 

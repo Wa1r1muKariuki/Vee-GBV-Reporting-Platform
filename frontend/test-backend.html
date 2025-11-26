@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Backend Test</title>
+</head>
+<body>
+    <h1>Vee Backend Test</h1>
+    <input id="message" type="text" placeholder="Type message" />
+    <button onclick="testChat()">Send</button>
+    <div id="result"></div>
+
+    <script>
+        async function testChat() {
+            const message = document.getElementById('message').value;
+            const resultDiv = document.getElementById('result');
+            
+            resultDiv.innerHTML = 'Sending...';
+            
+            try {
+                const response = await fetch('http://localhost:8000/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        session_id: 'test123',
+                        language: 'en'
+                    })
+                });
+                
+                const data = await response.json();
+                resultDiv.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+            } catch (err) {
+                resultDiv.innerHTML = 'ERROR: ' + err.message;
+            }
+        }
+    </script>
+</body>
+</html>

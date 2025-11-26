@@ -11,86 +11,54 @@ L.Icon.Default.mergeOptions({
   shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
 });
 
-// Custom icons for different incident types
+// Custom icons for different incident types (Keep this object defined here)
 const incidentIcons = {
+  physical_violence: new L.Icon({
+    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+    iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+  }),
+  sexual_violence: new L.Icon({
+    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-violet.png',
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+    iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+  }),
   harassment: new L.Icon({
     iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
     shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowSize: [41, 41]
+    iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
   }),
-  assault: new L.Icon({
-    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowSize: [41, 41]
-  }),
-  femicide: new L.Icon({
-    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-black.png',
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowSize: [41, 41]
-  }),
-  public_violence: new L.Icon({
+  emotional_abuse: new L.Icon({
     iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png',
     shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowSize: [41, 41]
+    iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
   }),
   domestic_violence: new L.Icon({
-    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-violet.png',
+    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-gold.png',
     shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowSize: [41, 41]
-  }),
-  workplace_harassment: new L.Icon({
-    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-yellow.png',
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowSize: [41, 41]
-  }),
-  online_harassment: new L.Icon({
-    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-grey.png',
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowSize: [41, 41]
+    iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
   }),
   other: new L.Icon({
     iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-grey.png',
     shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowSize: [41, 41]
+    iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
   })
 };
 
-export default function LeafletMap({ reports = [] }) {
+// --- FIX: Add the default export ---
+export default function LeafletMap({ reports = [] }) { 
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
 
   useEffect(() => {
     if (!mapRef.current) return;
+    if (mapInstanceRef.current) return; 
 
     // Initialize map centered on Kenya
-    const map = L.map(mapRef.current).setView([-1.286389, 36.817223], 7); // Nairobi coordinates
+    const map = L.map(mapRef.current).setView([-1.286389, 36.817223], 7); 
     
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
       maxZoom: 18,
     }).addTo(map);
 
@@ -99,51 +67,65 @@ export default function LeafletMap({ reports = [] }) {
     return () => {
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
       }
     };
   }, []);
 
+  // Handle Updates to Reports Data
   useEffect(() => {
     if (!mapInstanceRef.current || !reports.length) return;
 
     const map = mapInstanceRef.current;
     
-    // Clear existing markers
     map.eachLayer((layer) => {
       if (layer instanceof L.Marker) {
         map.removeLayer(layer);
       }
     });
 
-    // Add markers for each report
+    const markers = [];
+
     reports.forEach((report) => {
-      if (report.lat && report.lng) {
-        const icon = incidentIcons[report.type] || incidentIcons.other;
+      const lat = Number(report.lat);
+      const lng = Number(report.lng);
+
+      if (!isNaN(lat) && !isNaN(lng)) {
+        const typeKey = report.type ? report.type.toLowerCase() : 'other';
+        const icon = incidentIcons[typeKey] || incidentIcons.other;
         
-        const marker = L.marker([report.lat, report.lng], { icon })
+        const marker = L.marker([lat, lng], { icon })
           .addTo(map)
           .bindPopup(`
-            <div class="p-2 min-w-[200px]">
-              <strong class="text-sm capitalize">${report.type.replace(/_/g, ' ')}</strong><br/>
-              ${report.location ? `<div class="text-xs mt-1"><strong>Location:</strong> ${report.location}</div>` : ''}
-              ${report.description ? `<div class="text-xs mt-1"><strong>Details:</strong> ${report.description}</div>` : ''}
-              <div class="text-xs text-gray-500 mt-2">Approximate location - anonymized</div>
-            </div>
-          `);
+             <div class="p-3 min-w-[200px] text-slate-800 font-sans">
+          <strong class="text-sm uppercase font-bold text-slate-900 border-b border-slate-200 pb-1 mb-1 block">
+            ${report.type?.replace(/_/g, ' ') || 'Incident'}
+          </strong>
+          <div class="text-xs mt-2">
+            <div class="font-semibold">County: ${report.county || 'Unknown'}</div>
+            ${report.area ? `<div class="font-semibold">Area: ${report.area}</div>` : ''}
+            ${report.timeframe ? `<div class="text-slate-600">When: ${report.timeframe}</div>` : ''}
+            ${report.relationship ? `<div class="text-slate-600">Relationship: ${report.relationship}</div>` : ''}
+          </div>
+          <div class="text-[10px] text-slate-500 mt-1 italic">
+            Verified • Anonymized Location
+          </div>
+        </div>
+      `);
+      
+    markers.push(marker);
+  }
+});
+    if (markers.length > 0) {
+      const group = new L.featureGroup(markers);
+      try {
+        map.fitBounds(group.getBounds().pad(0.1));
+      } catch (e) {
+        console.log("Bounds error (safe to ignore if 1 marker):", e);
       }
-    });
-
-    // Fit map to show all markers if there are any
-    if (reports.length > 0) {
-      const group = new L.featureGroup(
-        reports
-          .filter(r => r.lat && r.lng)
-          .map(r => L.marker([r.lat, r.lng]))
-      );
-      map.fitBounds(group.getBounds().pad(0.1));
     }
 
   }, [reports]);
 
-  return <div ref={mapRef} className="w-full h-full" />;
+  return <div ref={mapRef} className="w-full h-full z-0 bg-slate-900" />;
 }

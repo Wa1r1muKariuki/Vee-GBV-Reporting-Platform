@@ -1,5 +1,8 @@
 // frontend/app/report/page.js
 "use client";
+import { AlertTriangle, CheckCircle, Shield } from "lucide-react";
+import Link from "next/link";
+
 
 import { useState } from "react";
 

@@ -20,6 +20,7 @@ interface ChatSidebarProps {
   onSetActiveChat: (id: number) => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  language: "en" | "sw"; // Add this line
 }
 
 export default function ChatSidebar({ 
@@ -29,16 +30,22 @@ export default function ChatSidebar({
   onDeleteChat, 
   onSetActiveChat,
   collapsed,
-  onToggleCollapse 
+  onToggleCollapse,
+  language // Add this prop
 }: ChatSidebarProps) {
   const formatTime = (date: Date) => {
     const now = new Date();
     const diffInDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
     
-    if (diffInDays === 0) return 'Today';
-    if (diffInDays === 1) return 'Yesterday';
-    if (diffInDays < 7) return `${diffInDays}d ago`;
+    if (diffInDays === 0) return language === 'sw' ? 'Leo' : 'Today';
+    if (diffInDays === 1) return language === 'sw' ? 'Jana' : 'Yesterday';
+    if (diffInDays < 7) return language === 'sw' ? `${diffInDays} siku zilizopita` : `${diffInDays}d ago`;
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  // Update the text content based on language
+  const getText = (english: string, swahili: string) => {
+    return language === 'sw' ? swahili : english;
   };
 
   return (
@@ -49,8 +56,12 @@ export default function ChatSidebar({
       <div className="p-4 border-b border-white/10 relative">
         {!collapsed ? (
           <div>
-            <h1 className="text-lg font-bold text-white">Chat History</h1>
-            <p className="text-xs text-gray-300 mt-0.5">Saved chats preserved</p>
+            <h1 className="text-lg font-bold text-white">
+              {getText('Chat History', 'Historia ya Mazungumzo')}
+            </h1>
+            <p className="text-xs text-gray-300 mt-0.5">
+              {getText('Saved chats preserved', 'Mazungumzo yaliyohifadhiwa')}
+            </p>
           </div>
         ) : (
           <div className="flex justify-center">
@@ -79,7 +90,7 @@ export default function ChatSidebar({
           }`}
         >
           <Plus size={16} />
-          {!collapsed && "New Chat"}
+          {!collapsed && getText('New Chat', 'Mazungumzo Mapya')}
         </button>
       </div>
 
@@ -98,6 +109,7 @@ export default function ChatSidebar({
                   onDelete={onDeleteChat}
                   formatTime={formatTime}
                   collapsed={collapsed}
+                  language={language}
                 />
               ))}
             </ul>
@@ -133,8 +145,12 @@ export default function ChatSidebar({
         {!collapsed && chats.length === 0 && (
           <div className="text-center py-8 px-4 text-gray-400">
             <MessageSquare size={32} className="mx-auto mb-3 opacity-50" />
-            <p className="text-xs font-medium text-gray-300 mb-1">No conversations</p>
-            <p className="text-xs">Start a new chat</p>
+            <p className="text-xs font-medium text-gray-300 mb-1">
+              {getText('No conversations', 'Hakuna mazungumzo')}
+            </p>
+            <p className="text-xs">
+              {getText('Start a new chat', 'Anza mazungumzo mapya')}
+            </p>
           </div>
         )}
       </div>
@@ -145,9 +161,9 @@ export default function ChatSidebar({
           <div className="text-xs text-gray-400 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
-              Encrypted & Anonymous
+              {getText('Encrypted & Anonymous', 'Imesimbwa na Bila Kukutambulisha')}
             </div>
-            <p className="text-xs">Privacy protected</p>
+            <p className="text-xs">{getText('Privacy protected', 'Faragha imelindwa')}</p>
           </div>
         ) : (
           <div className="flex justify-center">
@@ -165,7 +181,8 @@ function ChatSessionItem({
   onSave, 
   onDelete,
   formatTime,
-  collapsed 
+  collapsed,
+  language
 }: { 
   chat: any;
   onActivate: (id: number) => void;
@@ -173,8 +190,13 @@ function ChatSessionItem({
   onDelete: (id: number) => void;
   formatTime: (date: Date) => string;
   collapsed: boolean;
+  language: "en" | "sw";
 }) {
   if (collapsed) return null;
+
+  const getText = (english: string, swahili: string) => {
+    return language === 'sw' ? swahili : english;
+  };
 
   return (
     <li>
@@ -217,7 +239,7 @@ function ChatSessionItem({
                   ? "text-teal-400 hover:text-teal-300 bg-teal-400/10" 
                   : "text-gray-400 hover:text-gray-300 hover:bg-white/10"
               }`}
-              title={chat.saved ? "Unsave chat" : "Save chat"}
+              title={chat.saved ? getText('Unsave chat', 'Futa uhifadhi') : getText('Save chat', 'Hifadhi mazungumzo')}
             >
               {chat.saved ? <BookmarkCheck size={12} /> : <Bookmark size={12} />}
             </button>
@@ -227,7 +249,7 @@ function ChatSessionItem({
                 onDelete(chat.id);
               }}
               className="p-1 text-gray-400 hover:text-red-400 hover:bg-red-400/10 transition rounded-lg"
-              title="Delete chat"
+              title={getText('Delete chat', 'Futa mazungumzo')}
             >
               <Trash2 size={12} />
             </button>

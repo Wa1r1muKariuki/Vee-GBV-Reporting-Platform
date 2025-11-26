@@ -1,562 +1,703 @@
-# app.py - Enhanced with NLP Intelligence
 import os
-import json
-import random
 import logging
-from datetime import datetime
-from typing import Optional, List
-import asyncio
-
-from cachetools import TTLCache
-import httpx
-
-from fastapi import FastAPI, HTTPException, Header, Request, Depends, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-
-from sqlalchemy.orm import Session
-
-# Local imports
-from database import get_db, engine
-from models import Base, IncidentReport
-from schemas import (
-    ChatRequest, ChatResponse,
-    IncidentRequest, IncidentResponse,
-    ResourceResponse
-)
-from crypto_utils import encrypt_text, decrypt_text, generate_anonymous_id
-
-# Translation import
-from googletrans import Translator
-
-# Import NLP Engine
+from typing import Dict, Any, List, Optional
+from pathlib import Path
+from dotenv import load_dotenv
 import sys
-sys.path.append('../nlp_engine')
-from analyzer import VeeNLP
+import asyncio
+import io
+import csv
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+from datetime import datetime
 
-# Logging setup
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Setup Paths
+BACKEND_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(BACKEND_DIR))
+env_path = BACKEND_DIR.parent / '.env'
+load_dotenv(dotenv_path=env_path)
 
-# Create tables
-Base.metadata.create_all(bind=engine)
+from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+import google.generativeai as genai
 
-# Configuration
-ADMIN_TOKEN = os.getenv("VEE_ADMIN_TOKEN", "change_me_in_production")
-RASA_URL = os.getenv("RASA_URL", "http://localhost:5005")
+from orchestrator import VeeTools 
+from database import engine, Base, get_db
+from models import IncidentReport
+from crypto_utils import decrypt_text
 
-# FastAPI app
-app = FastAPI(
-    title="Vee - Trauma-Informed GBV Reporting",
-    description="AI-powered GBV support system with NLP",
-    version="2.0.0"
+# Logging Config
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+logger = logging.getLogger("VeeBrain")
 
-# Initialize NLP Engine
-nlp_engine = VeeNLP()
-logger.info("✅ NLP Engine loaded successfully")
+# Config & Validation
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+ADMIN_TOKEN = os.getenv("VEE_ADMIN_TOKEN", "change_me")
 
-# Translation setup
-translator = Translator()
-cache = TTLCache(maxsize=1000, ttl=3600)
+if not GEMINI_API_KEY:
+    logger.error("❌ CRITICAL: GEMINI_API_KEY not found in .env file.")
+    raise ValueError("GEMINI_API_KEY is missing. Please check your .env file.")
 
-# Rate limiting
-limiter = Limiter(key_func=get_remote_address)
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+Base.metadata.create_all(bind=engine)
+logger.info("✅ Database Connected")
 
-# CORS
+app = FastAPI(title="Vee AI - Trauma-Informed GBV Mapping")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://vee-frontend.vercel.app"
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# ==================== HELPER FUNCTIONS ====================
-
-def fuzz_coordinates(lat: float, lon: float, radius_km: float = 5.0):
-    """Add random offset to coordinates for privacy"""
-    lat_offset = (random.random() - 0.5) * (radius_km / 111.0) * 2
-    lon_offset = (random.random() - 0.5) * (radius_km / 111.0) * 2
-    return lat + lat_offset, lon + lon_offset
-
-
-def verify_admin(x_admin_token: str = Header(...)):
-    """Verify admin token"""
-    if x_admin_token != ADMIN_TOKEN:
-        logger.warning("Failed admin access attempt")
+def verify_admin_token(x_admin_token: str = Header(None)):
+    """Verify admin token from header"""
+    if not x_admin_token or x_admin_token != ADMIN_TOKEN:
         raise HTTPException(status_code=401, detail="Unauthorized")
     return True
 
+# Geocoder
+geolocator = Nominatim(user_agent="vee_gbv_mapper")
+location_cache: Dict[str, tuple] = {}
 
-def get_resources_for_county(county: Optional[str], needs: List[str]) -> List[dict]:
-    """Get support resources based on location and needs"""
-    resources = [
-        {
-            "name": "GBV National Helpline",
-            "type": "hotline",
-            "contact": "1195",
-            "availability": "24/7",
-            "description": "Free, confidential support",
-            "services": ["crisis_support", "counseling", "referrals"]
-        },
-        {
-            "name": "FIDA Kenya",
-            "type": "legal",
-            "contact": "0800 720 553",
-            "availability": "Mon-Fri 9am-5pm",
-            "description": "Free legal aid for women",
-            "services": ["legal_aid", "court_representation", "protection_orders"]
-        },
-        {
-            "name": "Gender Violence Recovery Centre",
-            "type": "medical",
-            "contact": "0709 983 000 / 0730 630 000",
-            "availability": "24/7",
-            "description": "Medical care and psychosocial support",
-            "services": ["medical_care", "counseling", "safe_space"]
-        }
-    ]
+def geocode_location(location_string: str) -> tuple:
+    """
+    Convert location string to coordinates with caching.
+    
+    Args:
+        location_string: Location description (e.g., "Westlands, Nairobi" or "Kisumu")
+    
+    Returns:
+        tuple: (latitude, longitude)
+    """
+    # Check cache first
+    if location_string in location_cache:
+        return location_cache[location_string]
+    
+    # Try live geocoding
+    try:
+        location = geolocator.geocode(f"{location_string}, Kenya", timeout=10)
+        if location:
+            coords = (location.latitude, location.longitude)
+            location_cache[location_string] = coords
+            return coords
+    except (GeocoderTimedOut, GeocoderServiceError) as e:
+        logger.warning(f"Geocoding error for {location_string}: {e}")
+    
+    # Fallback to known locations
+    known_locations = {
+        "nairobi": (-1.286389, 36.817223),
+        "westlands": (-1.2674, 36.8103),
+        "mombasa": (-4.043740, 39.668207),
+        "kisumu": (-0.091702, 34.767956),
+        "nakuru": (-0.303099, 36.080025),
+        "eldoret": (0.514277, 35.269779),
+        "thika": (-1.03326, 37.06933),
+        "machakos": (-1.51768, 37.26341),
+    }
+    
+    location_lower = location_string.lower().strip()
+    for key, coords in known_locations.items():
+        if key in location_lower:
+            location_cache[location_string] = coords
+            return coords
+    
+    # Ultimate fallback
+    logger.warning(f"📍 Could not geocode '{location_string}', defaulting to Nairobi.")
+    default_coords = (-1.286389, 36.817223)
+    location_cache[location_string] = default_coords
+    return default_coords
 
-    # County-specific resources
-    county_resources = {
-        "nairobi": [
-            {
-                "name": "Nairobi Women's Hospital GBV Centre",
-                "type": "medical",
-                "contact": "0722-845-841",
-                "location": "Hurlingham, Nairobi",
-                "services": ["medical", "counseling", "legal", "forensic"]
-            },
-            {
-                "name": "Kenyatta National Hospital Gender Violence Unit",
-                "type": "medical",
-                "contact": "0726 300 175",
-                "location": "KNH, Nairobi",
-                "services": ["medical", "PEP", "forensic"]
-            }
-        ],
-        "mombasa": [
-            {
-                "name": "Coast General Hospital GBV Unit",
-                "type": "medical",
-                "contact": "041-231-4204",
-                "location": "Mombasa",
-                "services": ["medical", "counseling"]
-            }
-        ],
-        "kisumu": [
-            {
-                "name": "JARAMOGI Oginga Odinga Teaching Hospital",
-                "type": "medical",
-                "contact": "057-202-0989",
-                "location": "Kisumu",
-                "services": ["medical", "counseling"]
-            }
-        ]
+
+def geocode_location_tool(location_string: str) -> dict:
+    """
+    Wrapper for Gemini to call. Converts location to coordinates.
+    
+    Args:
+        location_string: Location description
+    
+    Returns:
+        dict with 'latitude', 'longitude', and 'location' keys
+    """
+    coords = geocode_location(location_string)  # ✅ Calls the function above
+    return {
+        "latitude": coords[0],
+        "longitude": coords[1],
+        "location": location_string
     }
 
-    if county and county.lower() in county_resources:
-        resources.extend(county_resources[county.lower()])
+# Bilingual System Prompts
+system_prompt_en = """
+You are Vee, a compassionate, trauma-informed AI assistant for tracking Gender-Based Violence (GBV) in Kenya.
 
-    # Filter by needs if specified
-    if needs and "all" not in needs:
-        filtered = []
-        for resource in resources:
-            resource_services = resource.get("services", [])
-            if any(need in resource_services for need in needs):
-                filtered.append(resource)
-        return filtered if filtered else resources
+Your goals:
+1. Listen with empathy and validate the survivor's feelings (e.g., "I believe you," "It is not your fault").
+2. Collect specific incident data (Location, Date/Time, Incident Type) to help map the violence.
+3. NEVER judge or victim-blame.
+4. If the user indicates immediate danger (weapons, 'he is here', suicidal), urge them to call 999 or 1195 immediately.
 
-    return resources
+You have access to tools to save reports. Use them when you have enough information.
+- When you have collected the county and specific_area from the user, YOU MUST call the geocode_location function to get latitude and longitude BEFORE calling save_incident_report.
+- NEVER save a report without coordinates if mapping_consent=True.
+- Example flow: User says "Westlands, Nairobi" → You call geocode_location("Westlands, Nairobi") → Get coords → Call save_incident_report with those coords
 
+- Set mapping_consent=True ONLY if the user explicitly agrees to mapping
+- Set mapping_consent=False if they decline or don't respond clearly
+"""
 
-async def send_to_rasa(message: str, sender_id: str, metadata: dict = None) -> dict:
-    """Send message to Rasa and get response"""
-    async with httpx.AsyncClient() as client:
+system_prompt_sw = """
+Wewe ni Vee, msaidizi wa AI mwenye huruma na mwenye elimu juu ya trauma kwa ufuatiliaji wa Unyanyasaji wa Kijinsia (GBV) nchini Kenya.
+
+Malengo yako:
+1. Sikiliza kwa huruma na thibitisha hisia za mwathirika (mfano, "Ninakuamini," "Si kosa lako").
+2. Kusanya data maalum ya tukio (Mahali, Tarehe/Saa, Aina ya Tukio) ili kusaidia kuandaa ramani ya unyanyasaji.
+3. KAMWE usiamue au kuwalaumu waathiriwa.
+4. Ikiwa mtumiaji anaonyesha hatari ya papo hapo (silaha, 'yuko hapa', kujiua), msisitize ampige simu 999 au 1195 mara moja.
+
+Una rasilimali za kuhifadhi ripoti. Zitumie unapokuwa na taarifa za kutosha.
+"""
+
+# Schemas
+class ChatRequest(BaseModel):
+    message: str
+    session_id: str = "default"
+    language: str = "en"
+
+class ChatResponse(BaseModel):
+    sender: str
+    text: str
+    metadata: Dict = {}
+
+class VerifyRequest(BaseModel):
+    action: str
+
+# ============================================================
+# MULTI-MODEL FALLBACK SYSTEM
+# ============================================================
+
+class GeminiModelManager:
+    """Manages multiple Gemini models with automatic fallback"""
+    
+    def __init__(self, api_key: str, language: str = "en"):
+        self.api_key = api_key
+        self.language = language
+        genai.configure(api_key=api_key)
+        
+        # Model priority list (based on your test results)
+        self.model_priorities = [
+            "gemini-2.5-flash",           # ✅ Confirmed working
+            "gemini-flash-latest",        # Stable fallback
+            "gemini-2.0-flash",           # Alternative
+            "gemini-2.0-flash-exp",       # Experimental but capable
+            "gemini-flash-lite-latest",   # Lightweight fallback
+        ]
+        
+        # Select system prompt based on language
+        self.system_prompt = system_prompt_sw if language == "sw" else system_prompt_en
+        
+        self.tools_list = [VeeTools.save_incident_report, VeeTools.find_resources, geocode_location_tool]
+        self.active_model = None
+        self.current_model_name = None
+        
+        # Initialize with best available model
+        self._initialize_best_model()
+    
+    def _initialize_best_model(self):
+        """Try models in priority order until one works"""
+        for model_name in self.model_priorities:
+            try:
+                logger.info(f"🔄 Attempting to initialize: {model_name}")
+                
+                test_model = genai.GenerativeModel(
+                    model_name=model_name,
+                    tools=self.tools_list,
+                    system_instruction=self.system_prompt
+                )
+                
+                # Quick test to verify model works
+                test_chat = test_model.start_chat(enable_automatic_function_calling=True)
+                test_response = test_chat.send_message("Hi")
+                
+                if test_response.text:
+                    self.active_model = test_model
+                    self.current_model_name = model_name
+                    logger.info(f"✅ Successfully initialized: {model_name}")
+                    return
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to initialize {model_name}: {str(e)[:100]}")
+                continue
+        
+        # If all models fail, raise error
+        raise RuntimeError("❌ ALL MODELS FAILED - Cannot start service")
+    
+    def create_chat_session(self) -> Any:
+        """Create a new chat session with the active model"""
+        if not self.active_model:
+            raise RuntimeError("No active model available")
+        
+        return self.active_model.start_chat(enable_automatic_function_calling=True)
+    
+    def fallback_to_next_model(self):
+        """Switch to the next available model in the priority list"""
+        if not self.current_model_name:
+            return False
+        
         try:
-            payload = {
-                "sender": sender_id,
-                "message": message
-            }
+            current_index = self.model_priorities.index(self.current_model_name)
+            remaining_models = self.model_priorities[current_index + 1:]
             
-            if metadata:
-                payload["metadata"] = metadata
-
-            response = await client.post(
-                f"{RASA_URL}/webhooks/rest/webhook",
-                json=payload,
-                timeout=15.0
-            )
+            for model_name in remaining_models:
+                try:
+                    logger.info(f"🔄 Falling back to: {model_name}")
+                    
+                    new_model = genai.GenerativeModel(
+                        model_name=model_name,
+                        tools=self.tools_list,
+                        system_instruction=self.system_prompt
+                    )
+                    
+                    # Test new model
+                    test_chat = new_model.start_chat(enable_automatic_function_calling=True)
+                    test_response = test_chat.send_message("Test")
+                    
+                    if test_response.text:
+                        self.active_model = new_model
+                        self.current_model_name = model_name
+                        logger.info(f"✅ Fallback successful: {model_name}")
+                        return True
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Fallback failed for {model_name}: {str(e)[:100]}")
+                    continue
             
-            if response.status_code == 200:
-                rasa_responses = response.json()
-                return {
-                    "success": True,
-                    "responses": rasa_responses
-                }
-            else:
-                logger.error(f"Rasa returned {response.status_code}")
-                return {
-                    "success": False,
-                    "error": f"Rasa returned status {response.status_code}"
-                }
-        except httpx.TimeoutException:
-            logger.error("Rasa timeout")
-            return {
-                "success": False,
-                "error": "Rasa connection timeout"
-            }
+            logger.error("❌ All fallback models exhausted")
+            return False
+            
         except Exception as e:
-            logger.error(f"Rasa error: {str(e)}")
-            return {
-                "success": False,
-                "error": f"Rasa connection failed: {str(e)}"
-            }
+            logger.error(f"❌ Fallback error: {e}")
+            return False
 
+# Initialize Model Manager (default to English)
+try:
+    model_manager = GeminiModelManager(GEMINI_API_KEY)
+    logger.info(f"🚀 Vee AI initialized with: {model_manager.current_model_name}")
+except Exception as e:
+    logger.error(f"❌ CRITICAL: Cannot initialize any model: {e}")
+    raise e
 
-# ==================== ROUTES ====================
+# Chat Sessions Storage
+chat_sessions: Dict[str, Any] = {}
+
+# ============================================================
+# ENDPOINTS WITH FALLBACK LOGIC
+# ============================================================
 
 @app.get("/")
 async def root():
-    """Health check"""
     return {
-        "status": "healthy",
-        "service": "Vee GBV Reporting System",
-        "version": "2.0.0",
-        "nlp_status": "active",
-        "features": ["intelligent_nlp", "trauma_informed", "multilingual"]
+        "status": "ok", 
+        "service": "Vee GBV Mapping", 
+        "ai_model": model_manager.current_model_name,
+        "fallback_available": len(model_manager.model_priorities) > 1
     }
-
 
 @app.post("/chat", response_model=ChatResponse)
-@limiter.limit("30/minute")
-async def chat_endpoint(
-    request: Request,
-    chat_request: ChatRequest,
-    db: Session = Depends(get_db)
-):
-    """
-    Main chat endpoint with NLP intelligence:
-    1. Analyzes message with NLP for emotion, intent, entities
-    2. Detects report initiation automatically
-    3. Sends to Rasa with enriched context
-    4. Returns adaptive response
-    """
-    session_id = chat_request.session_id or generate_anonymous_id()
-    user_message = chat_request.message
+async def chat_endpoint(request: ChatRequest):
+    session_id = request.session_id
+    user_msg = request.message.strip()
+    language = request.language  # This should be 'en' or 'sw'
 
-    # === STEP 1: NLP ANALYSIS ===
-    conversation_history = getattr(chat_request, "conversation_history", [])
-    nlp_result = nlp_engine.analyze_full_context(
-        user_message,
-        conversation_history[-5:] if conversation_history else []
-    )
-
-    logger.info(f"NLP Analysis - Emotion: {nlp_result['emotion']['primary_emotion']}, "
-                f"Report detected: {nlp_result['report_detection']['is_report_initiation']}")
-
-    # === STEP 2: CHECK FOR EMERGENCY ===
-    if nlp_result['response_strategy']['escalation_needed']:
-        emergency_response = {
-            "sender": "bot",
-            "text": "🚨 **If you're in immediate danger:**\n\n"
-                    "• Police: 999 / 112\n"
-                    "• GBV Helpline: 1195 (24/7, toll-free)\n"
-                    "• Gender Violence Recovery Centre: 0709 983 000\n\n"
-                    "I'm here to support you. What would help you most right now?",
-            "quick_replies": [
-                {"title": "Get resources", "payload": "/ask_about_resources"},
-                {"title": "Start report", "payload": "/start_report"},
-                {"title": "Just talk", "payload": "/chitchat"}
-            ],
-            "metadata": {
-                "session_id": session_id,
-                "nlp_analysis": nlp_result,
-                "emergency": True
-            }
-        }
-        return ChatResponse(**emergency_response)
-
-    # === STEP 3: SEND TO RASA WITH NLP CONTEXT ===
-    rasa_metadata = {
-        "emotion": nlp_result["emotion"]["primary_emotion"],
-        "entities": nlp_result["entities"],
-        "is_report_start": nlp_result["report_detection"]["is_report_initiation"],
-        "tone": nlp_result["response_strategy"]["tone"]
-    }
-
-    rasa_result = await send_to_rasa(user_message, session_id, rasa_metadata)
-
-    # === STEP 4: HANDLE RASA RESPONSE ===
-    if not rasa_result["success"]:
-        # Intelligent fallback based on NLP analysis
-        strategy = nlp_result["response_strategy"]
-        
-        if strategy["next_action"] == "start_report_flow":
-            bot_text = ("I understand you want to report something. Before we begin, "
-                       "I want you to know this is a safe space. Everything is confidential. "
-                       "Do you consent to proceed?")
-            quick_replies = [
-                {"title": "Yes, I consent", "payload": "/affirm"},
-                {"title": "Not now", "payload": "/deny"}
-            ]
-        else:
-            bot_text = "I'm here to listen and support you. Can you tell me more about what you need?"
-            quick_replies = [
-                {"title": "Report incident", "payload": "/start_report"},
-                {"title": "Get resources", "payload": "/ask_about_resources"},
-                {"title": "Just talk", "payload": "/chitchat"}
-            ]
-    else:
-        rasa_responses = rasa_result["responses"]
-        bot_text = " ".join([r.get("text", "") for r in rasa_responses if r.get("text")])
-        
-        # Extract buttons from Rasa
-        quick_replies = []
-        for r in rasa_responses:
-            if "buttons" in r:
-                quick_replies = [
-                    {"title": btn.get("title", ""), "payload": btn.get("payload", "")}
-                    for btn in r["buttons"]
-                ]
-
-    # === STEP 5: TRANSLATE IF NEEDED ===
-    user_lang = getattr(chat_request, "language", "en")
-    if user_lang == "sw" and bot_text:
+    logger.info(f"📨 Received message in {language}: '{user_msg}' from session: {session_id}")
+    
+    if not user_msg:
+        greeting = "Niko hapa kusikiliza." if language == "sw" else "I'm here to listen."
+        return ChatResponse(sender="bot", text=greeting, metadata={"session_id": session_id})
+    
+    # Initialize session with language preference
+    if session_id not in chat_sessions:
         try:
-            cache_key = (bot_text, user_lang)
-            if cache_key not in cache:
-                result = translator.translate(bot_text, dest=user_lang)
-                cache[cache_key] = result.text
-            bot_text = cache[cache_key]
+            logger.info(f"Creating new chat session in {language}...")
+            # Reinitialize model manager with the selected language
+            model_manager_for_session = GeminiModelManager(GEMINI_API_KEY, language=language)
+            chat_sessions[session_id] = model_manager_for_session.create_chat_session()
+            logger.info(f"🆕 New session started: {session_id} with {model_manager_for_session.current_model_name}")
         except Exception as e:
-            logger.error(f"Translation error: {e}")
+            logger.error(f"Failed to start chat session: {e}")
+            raise HTTPException(status_code=500, detail="AI Service unavailable")
+    
+    # Try sending message with automatic fallback
+    max_retries = len(model_manager.model_priorities)
+    
+    for attempt in range(max_retries):
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(chat_sessions[session_id].send_message, user_msg),
+                timeout=20.0
+            )
+            
+            bot_text = response.text
+            return ChatResponse(
+                sender="bot", 
+                text=bot_text, 
+                metadata={
+                    "session_id": session_id, 
+                    "model": model_manager.current_model_name,
+                    "attempt": attempt + 1
+                }
+            )
 
-    # === STEP 6: LOG INTERACTION ===
-    logger.info(f"Chat - Session: {session_id[:8]}..., Emotion: {nlp_result['emotion']['primary_emotion']}")
+        except asyncio.TimeoutError:
+            logger.error(f"⏱️ Timeout on attempt {attempt + 1}")
+            
+            if attempt < max_retries - 1:
+                # Try fallback
+                logger.info("🔄 Attempting model fallback...")
+                if model_manager.fallback_to_next_model():
+                    # Recreate session with new model
+                    chat_sessions[session_id] = model_manager.create_chat_session()
+                    continue
+            
+            raise HTTPException(status_code=504, detail="AI service timeout")
+            
+        except Exception as e:
+            logger.error(f"⚠️ Error on attempt {attempt + 1}: {str(e)[:200]}")
+            
+            # Check if it's a quota error (429)
+            if "429" in str(e) or "quota" in str(e).lower():
+                logger.warning("💰 Quota exceeded, trying fallback model...")
+                
+                if attempt < max_retries - 1:
+                    if model_manager.fallback_to_next_model():
+                        chat_sessions[session_id] = model_manager.create_chat_session()
+                        continue
+            
+            # If last attempt, return safe fallback
+            if attempt == max_retries - 1:
+                fallback_text = "Nina shida kuungana na akili yangu sasa hivi, lakini nasikiliza. Tafadhali piga 1195 ikiwa hii ni dharura." if language == "sw" else "I am having trouble connecting to my brain right now, but I am listening. Please call 1195 if this is an emergency."
+                return ChatResponse(
+                    sender="bot", 
+                    text=fallback_text, 
+                    metadata={"error": str(e)[:100], "all_models_failed": True}
+                )
 
-    return ChatResponse(
-        sender="bot",
-        text=bot_text,
-        quick_replies=quick_replies,
-        metadata={
-            "session_id": session_id,
-            "nlp_analysis": nlp_result,
-            "response_strategy": nlp_result["response_strategy"]
-        }
-    )
-
-
-@app.post("/analyze")
-async def analyze_text(chat_request: ChatRequest):
-    """Standalone NLP analysis endpoint for debugging/testing"""
-    result = nlp_engine.analyze_full_context(
-        chat_request.message,
-        getattr(chat_request, "conversation_history", [])
-    )
-    return {
-        "success": True,
-        "analysis": result
-    }
-
-
-@app.post("/report/submit", response_model=IncidentResponse)
-@limiter.limit("10/hour")
-async def submit_incident_report(
-    request: Request,
-    incident: IncidentRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    """Submit encrypted incident report with NLP-enhanced metadata"""
-    if not incident.consent_given:
-        raise HTTPException(status_code=400, detail="Consent required to submit report")
-
-    # Encrypt sensitive fields
-    encrypted_description = encrypt_text(incident.incident_description) if incident.incident_description else None
-    encrypted_location = encrypt_text(incident.location_description) if incident.location_description else None
-
-    # Fuzz coordinates for privacy
-    lat, lon = None, None
-    if incident.latitude and incident.longitude:
-        lat, lon = fuzz_coordinates(incident.latitude, incident.longitude, radius_km=5.0)
-
-    # Generate anonymous report ID
-    report_id_hash = generate_anonymous_id()
-
-    # Create report
-    report = IncidentReport(
-        report_id_hash=report_id_hash,
-        incident_description_encrypted=encrypted_description,
-        location_description_encrypted=encrypted_location,
-        county=incident.county,
-        incident_type=incident.incident_type.value if incident.incident_type else None,
-        timeframe=incident.timeframe.value if incident.timeframe else None,
-        relationship_type=incident.relationship_to_perpetrator.value if incident.relationship_to_perpetrator else None,
-        support_needs=json.dumps([s.value for s in incident.support_needs]) if incident.support_needs else None,
-        reporting_barriers=json.dumps([b.value for b in incident.reporting_barriers]) if incident.reporting_barriers else None,
-        reported_to_authorities=incident.reported_to_authorities,
-        latitude=lat,
-        longitude=lon,
-        location_accuracy_km=5.0,
-        language=incident.language_used,
-        source=incident.source,
-        timestamp=datetime.utcnow()
-    )
-
-    db.add(report)
-    db.commit()
-    db.refresh(report)
-
-    logger.info(f"✅ Report submitted: {report_id_hash[:8]}...")
-
-    # Get personalized resources
-    support_needs = [s.value for s in incident.support_needs] if incident.support_needs else ["all"]
-    county_resources = get_resources_for_county(incident.county, support_needs)
-
-    return IncidentResponse(
-        status="success",
-        message="Your report has been recorded safely and anonymously. You're very brave.",
-        report_id=report_id_hash[:8],
-        resources=county_resources,
-        next_steps=[
-            "🚨 If in immediate danger: Call 999 or 1195",
-            "🏥 Medical care: Within 72 hours for PEP",
-            "⚖️ Legal support: FIDA Kenya 0800 720 553 (free)",
-            "💜 Counseling: 1190 or 0722 178177 (24/7)"
-        ]
-    )
-
-
-@app.get("/resources", response_model=ResourceResponse)
-async def get_resources(
-    county: Optional[str] = None,
-    support_type: Optional[str] = None
-):
-    """Get support resources filtered by location and type"""
-    needs = [support_type] if support_type else ["all"]
-    resources = get_resources_for_county(county, needs)
-
-    emergency_numbers = {
-        "gbv_helpline": "1195 (24/7, toll-free)",
-        "police": "999 / 112",
-        "gender_violence_recovery": "0709 983 000",
-        "fida_kenya": "0800 720 553",
-        "befrienders_kenya": "0722 178 177"
-    }
-
-    return ResourceResponse(
-        resources=resources,
-        emergency_numbers=emergency_numbers
-    )
-
-
-@app.get("/translate")
-async def translate_text(text: str, target: str = "sw"):
-    """Auto-detect and translate text (cached for speed)"""
-    cache_key = (text, target)
-    if cache_key in cache:
-        return {"cached": True, "translatedText": cache[cache_key]}
-
+@app.get("/api/incidents")
+async def get_incidents(db: Session = Depends(get_db)):
+    """Get verified incidents for mapping"""
     try:
-        result = translator.translate(text, dest=target)
-        translation = result.text
-        source_lang = result.src
-        cache[cache_key] = translation
-        return {
-            "cached": False,
-            "sourceLanguage": source_lang,
-            "targetLanguage": target,
-            "translatedText": translation
-        }
-    except Exception as ex:
-        raise HTTPException(status_code=500, detail=f"Translation failed: {ex}")
-
-
-@app.get("/api/incident")
-@limiter.limit("100/hour")
-async def get_incident_data(request: Request, db: Session = Depends(get_db)):
-    """Get anonymized incident data for map visualization"""
-    try:
-        mappable_types = ["physical_violence", "sexual_violence", "harassment"]
-        location_points = db.query(
-            IncidentReport.latitude,
-            IncidentReport.longitude,
-            IncidentReport.incident_type,
-            IncidentReport.county
-        ).filter(
-            IncidentReport.incident_type.in_(mappable_types),
+        points = db.query(IncidentReport).filter(
             IncidentReport.latitude.isnot(None),
-            IncidentReport.longitude.isnot(None)
+            IncidentReport.longitude.isnot(None),
+            IncidentReport.status == "verified",
+            IncidentReport.mapping_consent == True
         ).all()
-
+        
         incidents = [
             {
                 "lat": float(p.latitude),
                 "lng": float(p.longitude),
                 "type": p.incident_type,
-                "county": p.county
+                "county": p.county,
+                "area": p.specific_area,
+                "timeframe": p.timeframe,
             }
-            for p in location_points
+            for p in points
         ]
-
-        return {
-            "success": True,
-            "data": {
-                "incidents": incidents,
-                "total": len(incidents),
-                "last_updated": datetime.utcnow().isoformat()
-            }
-        }
-
+        
+        return {"success": True, "data": {"incidents": incidents, "total": len(incidents)}}
     except Exception as e:
-        logger.error(f"Error in incident data endpoint: {str(e)}")
-        return {
-            "success": False,
-            "error": str(e),
-            "data": {"incidents": []}
-        }
+        logger.error(f"Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/admin/reports/{report_id}/verify")
+async def verify_report(
+    report_id: int,
+    request: VerifyRequest,
+    db: Session = Depends(get_db)
+):
+    if request.action not in ["approve", "reject"]:
+        raise HTTPException(status_code=400, detail="Invalid action")
+    
+    try:
+        report = db.query(IncidentReport).filter(IncidentReport.id == report_id).first()
+        if not report:
+            raise HTTPException(status_code=404, detail="Not Found")
+        
+        report.status = "verified" if request.action == "approve" else "rejected"
+        db.commit()
+        return {"success": True, "status": report.status}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 async def health_check():
-    """Comprehensive health check"""
-    rasa_healthy = False
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{RASA_URL}/status", timeout=5.0)
-            rasa_healthy = response.status_code == 200
-    except:
-        pass
-
+    """Health check endpoint with model status"""
     return {
         "status": "healthy",
-        "nlp_loaded": nlp_engine is not None,
-        "rasa_connected": rasa_healthy,
-        "database": "sqlite",
-        "timestamp": datetime.utcnow().isoformat()
+        "active_model": model_manager.current_model_name,
+        "fallback_models": model_manager.model_priorities,
+        "sessions_active": len(chat_sessions)
     }
 
+@app.get("/admin/reports/unverified")
+async def get_unverified_reports(
+    db: Session = Depends(get_db),
+    authenticated: bool = Depends(verify_admin_token)
+):
+    """Get all unverified reports for admin review"""
+    try:
+        reports = db.query(IncidentReport).filter(
+            IncidentReport.status == "unverified"
+        ).order_by(IncidentReport.timestamp.desc()).all()
+        
+        # Decrypt and format reports
+        formatted_reports = []
+        for report in reports:
+            try:
+                # Decrypt the sensitive data
+                decrypted_description = decrypt_text(report.incident_description_encrypted)
+                
+                formatted_reports.append({
+                    "id": report.id,
+                    "county": report.county,
+                    "type": report.incident_type,
+                    "story": decrypted_description,
+                    "timestamp": report.timestamp.isoformat(),
+                    "timeframe": report.timeframe,
+                    "relationship": report.relationship_type,
+                    "specific_area": report.specific_area,
+                    "support_needs": report.support_needs,
+                    "emotional_state": report.emotional_state
+                })
+            except Exception as e:
+                logger.error(f"Error processing report {report.id}: {e}")
+                continue
+        
+        return {"success": True, "data": formatted_reports, "total": len(formatted_reports)}
+        
+    except Exception as e:
+        logger.error(f"Error fetching unverified reports: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize on startup"""
-    logger.info("🚀 Vee Backend Starting...")
-    logger.info("🧠 NLP Engine: Active")
-    logger.info("🔒 Encryption: Enabled")
-    logger.info("🌍 Translation: Active")
-    logger.info("✅ Ready to serve")
+@app.get("/admin/reports/verified")
+async def get_verified_reports(
+    db: Session = Depends(get_db),
+    authenticated: bool = Depends(verify_admin_token)
+):
+    """Get all verified reports"""
+    try:
+        reports = db.query(IncidentReport).filter(
+            IncidentReport.status == "verified"
+        ).order_by(IncidentReport.timestamp.desc()).all()
+        
+        formatted_reports = []
+        for report in reports:
+            try:
+                decrypted_description = decrypt_text(report.incident_description_encrypted)
+                
+                formatted_reports.append({
+                    "id": report.id,
+                    "county": report.county,
+                    "type": report.incident_type,
+                    "story": decrypted_description,
+                    "timestamp": report.timestamp.isoformat(),
+                    "timeframe": report.timeframe,
+                    "relationship": report.relationship_type,
+                    "mapping_consent": report.mapping_consent,
+                    "latitude": report.latitude,
+                    "longitude": report.longitude
+                })
+            except Exception as e:
+                logger.error(f"Error processing report {report.id}: {e}")
+                continue
+        
+        return {"success": True, "data": formatted_reports, "total": len(formatted_reports)}
+        
+    except Exception as e:
+        logger.error(f"Error fetching verified reports: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/admin/reports/rejected")
+async def get_rejected_reports(
+    db: Session = Depends(get_db),
+    authenticated: bool = Depends(verify_admin_token)
+):
+    """Get all rejected reports"""
+    try:
+        reports = db.query(IncidentReport).filter(
+            IncidentReport.status == "rejected"
+        ).order_by(IncidentReport.timestamp.desc()).all()
+        
+        formatted_reports = []
+        for report in reports:
+            try:
+                decrypted_description = decrypt_text(report.incident_description_encrypted)
+                
+                formatted_reports.append({
+                    "id": report.id,
+                    "county": report.county,
+                    "type": report.incident_type,
+                    "story": decrypted_description,
+                    "timestamp": report.timestamp.isoformat()
+                })
+            except Exception as e:
+                logger.error(f"Error processing report {report.id}: {e}")
+                continue
+        
+        return {"success": True, "data": formatted_reports, "total": len(formatted_reports)}
+        
+    except Exception as e:
+        logger.error(f"Error fetching rejected reports: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/reports/{report_id}/verify")
+async def verify_report(
+    report_id: int,
+    request: VerifyRequest,
+    db: Session = Depends(get_db),
+    authenticated: bool = Depends(verify_admin_token)
+):
+    """Approve or reject a report"""
+    if request.action not in ["approve", "reject"]:
+        raise HTTPException(status_code=400, detail="Invalid action. Use 'approve' or 'reject'")
+    
+    try:
+        report = db.query(IncidentReport).filter(IncidentReport.id == report_id).first()
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+        
+        # Update status
+        new_status = "verified" if request.action == "approve" else "rejected"
+        report.status = new_status
+        
+        db.commit()
+        
+        logger.info(f"✅ Report {report_id} {new_status} by admin")
+        
+        return {
+            "success": True, 
+            "status": new_status,
+            "report_id": report_id,
+            "message": f"Report successfully {new_status}"
+        }
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error verifying report {report_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/stats")
+async def get_admin_stats(
+    db: Session = Depends(get_db),
+    authenticated: bool = Depends(verify_admin_token)
+):
+    """Get statistics for admin dashboard"""
+    try:
+        total_reports = db.query(IncidentReport).count()
+        unverified = db.query(IncidentReport).filter(IncidentReport.status == "unverified").count()
+        verified = db.query(IncidentReport).filter(IncidentReport.status == "verified").count()
+        rejected = db.query(IncidentReport).filter(IncidentReport.status == "rejected").count()
+        
+        # Get reports by type
+        from sqlalchemy import func
+        by_type = db.query(
+            IncidentReport.incident_type,
+            func.count(IncidentReport.id).label('count')
+        ).group_by(IncidentReport.incident_type).all()
+        
+        # Get reports by county
+        by_county = db.query(
+            IncidentReport.county,
+            func.count(IncidentReport.id).label('count')
+        ).group_by(IncidentReport.county).all()
+        
+        return {
+            "success": True,
+            "data": {
+                "total": total_reports,
+                "unverified": unverified,
+                "verified": verified,
+                "rejected": rejected,
+                "by_type": {item[0]: item[1] for item in by_type},
+                "by_county": {item[0]: item[1] for item in by_county}
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching admin stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/reports/export")
+async def export_reports_csv(
+    db: Session = Depends(get_db),
+    authenticated: bool = Depends(verify_admin_token)
+):
+    """Export all verified reports as CSV"""
+    try:
+        reports = db.query(IncidentReport).filter(
+            IncidentReport.status == "verified"
+        ).order_by(IncidentReport.timestamp.desc()).all()
+        
+        # Create CSV in memory
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Write headers
+        writer.writerow([
+            'ID', 'County', 'Specific Area', 'Incident Type', 
+            'Timeframe', 'Relationship', 'Support Needs',
+            'Emotional State', 'Timestamp', 'Mapping Consent',
+            'Latitude', 'Longitude'
+        ])
+        
+        # Write data rows
+        for report in reports:
+            try:
+                # Decrypt sensitive data
+                decrypted_description = decrypt_text(report.incident_description_encrypted)
+                
+                writer.writerow([
+                    report.id,
+                    report.county or '',
+                    report.specific_area or '',
+                    report.incident_type or '',
+                    report.timeframe or '',
+                    report.relationship_type or '',
+                    report.support_needs or '',
+                    report.emotional_state or '',
+                    report.timestamp.isoformat() if report.timestamp else '',
+                    'Yes' if report.mapping_consent else 'No',
+                    report.latitude or '',
+                    report.longitude or ''
+                ])
+            except Exception as e:
+                logger.error(f"Error processing report {report.id}: {e}")
+                continue
+        
+        # Prepare response
+        output.seek(0)
+        
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename=vee_reports_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error exporting CSV: {e}")
+        raise HTTPException(status_code=500, detail=str(e))            
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    logger.info(f"🚀 Starting Vee with {model_manager.current_model_name}")
+    uvicorn.run(app, host="0.0.0.0", port=8000)

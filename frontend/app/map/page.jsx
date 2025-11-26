@@ -1,14 +1,22 @@
 "use client";
-
 import { useEffect, useState } from "react";
-import IncidentMap from "@/components/IncidentMap";
-import MapSidebar from "@/components/MapSidebar";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
-import { 
-  Search, Filter, MapPin, Calendar, Shield, 
-  FileText, X, ChevronDown 
-} from "lucide-react";
+import { Search, Filter, MapPin, Shield, FileText, AlertTriangle, Calendar, X, ChevronDown } from "lucide-react";
+import MapSidebar from "@/components/MapSidebar";
+
+// Dynamic Map Import
+const IncidentMap = dynamic(() => import("@/components/IncidentMap"), { 
+  ssr: false,
+  loading: () => (
+    <div className="h-full w-full bg-slate-900 animate-pulse flex items-center justify-center text-teal-500">
+      Loading Map...
+    </div>
+  )
+});
+
+const API_URL = "http://localhost:8000";
 
 // ==================== NAVBAR COMPONENT ====================
 
@@ -29,12 +37,11 @@ function Navbar() {
     <header className="fixed top-4 left-0 w-full z-50 flex justify-center items-center">
       {/* Floating Nav Container */}
       <nav className="bg-black/60 backdrop-blur-lg border border-white/10 rounded-full px-8 py-2 shadow-2xl flex items-center justify-center space-x-8 text-white">
-              <Link
+        <Link
           href="/Home"
           className="hover:text-teal-300 transition duration-200 text-xs font-medium tracking-wide"
         >
           Home
-
         </Link>
         <Link
           href="/chat"
@@ -229,7 +236,7 @@ export default function MapPage() {
   useEffect(() => {
     async function fetchReports() {
       try {
-        const res = await fetch("http://127.0.0.1:8000/api/incident", {
+        const res = await fetch(`${API_URL}/api/incidents`, {
           cache: "no-store",
         });
 
