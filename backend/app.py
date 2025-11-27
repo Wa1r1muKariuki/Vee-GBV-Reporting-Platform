@@ -9,7 +9,7 @@ import io
 import csv
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
-from datetime import datetime
+from datetime import datetime,timedelta
 
 # Setup Paths
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -126,7 +126,7 @@ def geocode_location_tool(location_string: str) -> dict:
     Returns:
         dict with 'latitude', 'longitude', and 'location' keys
     """
-    coords = geocode_location(location_string)  # ✅ Calls the function above
+    coords = geocode_location(location_string)
     return {
         "latitude": coords[0],
         "longitude": coords[1],
@@ -162,6 +162,14 @@ Malengo yako:
 4. Ikiwa mtumiaji anaonyesha hatari ya papo hapo (silaha, 'yuko hapa', kujiua), msisitize ampige simu 999 au 1195 mara moja.
 
 Una rasilimali za kuhifadhi ripoti. Zitumie unapokuwa na taarifa za kutosha.
+- Ukishapata kaunti na eneo maalum kutoka kwa mtumiaji, LAZIMA uite kazi ya geocode_location ili upate latitudo na longitudo KABLA ya kuitia save_incident_report.
+- KAMWE usihifadhi ripoti bila kuratibu ikiwa mapping_consent=True.
+- Weka mapping_consent=True TU kama mtumiaji anakubali wazi ramani
+- Weka mapping_consent=False kama anakataa au hajajibu kwa uwazi
+
+Mfano wa mazungumzo:
+Mtumiaji: "Nimeathiriwa huko Westlands, Nairobi"
+Wewe: "Pole sana kwa hayo. Ninakuamini na si kosa lako. Nitaweza kuhifadhi taarifa hizi ili kusaidia? Je, unakubali taarifa zako zionekane kwenye ramani?" 
 """
 
 # Schemas
@@ -295,6 +303,7 @@ except Exception as e:
 
 # Chat Sessions Storage
 chat_sessions: Dict[str, Any] = {}
+session_model_managers: Dict[str, GeminiModelManager] = {}
 
 # ============================================================
 # ENDPOINTS WITH FALLBACK LOGIC
@@ -313,7 +322,7 @@ async def root():
 async def chat_endpoint(request: ChatRequest):
     session_id = request.session_id
     user_msg = request.message.strip()
-    language = request.language  # This should be 'en' or 'sw'
+    language = request.language
 
     logger.info(f"📨 Received message in {language}: '{user_msg}' from session: {session_id}")
     
@@ -321,25 +330,40 @@ async def chat_endpoint(request: ChatRequest):
         greeting = "Niko hapa kusikiliza." if language == "sw" else "I'm here to listen."
         return ChatResponse(sender="bot", text=greeting, metadata={"session_id": session_id})
     
-    # Initialize session with language preference
-    if session_id not in chat_sessions:
+    # Check if we need to create new session or switch language
+    session_key = f"{session_id}_{language}"
+    
+    # Check if we need new session (new session or language change)
+    needs_new_session = (
+        session_key not in chat_sessions or 
+        session_key not in session_model_managers or
+        session_model_managers.get(session_key).language != language
+    )
+    
+    if needs_new_session:
         try:
-            logger.info(f"Creating new chat session in {language}...")
-            # Reinitialize model manager with the selected language
+            logger.info(f"🆕 Creating new chat session in {language}...")
+            # Create new model manager with correct language
             model_manager_for_session = GeminiModelManager(GEMINI_API_KEY, language=language)
-            chat_sessions[session_id] = model_manager_for_session.create_chat_session()
-            logger.info(f"🆕 New session started: {session_id} with {model_manager_for_session.current_model_name}")
+            session_model_managers[session_key] = model_manager_for_session
+            chat_sessions[session_key] = model_manager_for_session.create_chat_session()
+            logger.info(f"✅ New session started: {session_key} with {model_manager_for_session.current_model_name}")
         except Exception as e:
-            logger.error(f"Failed to start chat session: {e}")
-            raise HTTPException(status_code=500, detail="AI Service unavailable")
+            logger.error(f"❌ Failed to start chat session: {e}")
+            fallback_msg = "Samahani, nina shida ya kuanza mazungumzo. Tafadhali jaribu tena." if language == "sw" else "Sorry, I'm having trouble starting the conversation. Please try again."
+            return ChatResponse(sender="bot", text=fallback_msg, metadata={"error": "session_failed"})
+    
+    # Get the session and its model manager
+    current_chat_session = chat_sessions[session_key]
+    current_model_manager = session_model_managers[session_key]
     
     # Try sending message with automatic fallback
-    max_retries = len(model_manager.model_priorities)
+    max_retries = len(current_model_manager.model_priorities)
     
     for attempt in range(max_retries):
         try:
             response = await asyncio.wait_for(
-                asyncio.to_thread(chat_sessions[session_id].send_message, user_msg),
+                asyncio.to_thread(current_chat_session.send_message, user_msg),
                 timeout=20.0
             )
             
@@ -348,8 +372,9 @@ async def chat_endpoint(request: ChatRequest):
                 sender="bot", 
                 text=bot_text, 
                 metadata={
-                    "session_id": session_id, 
-                    "model": model_manager.current_model_name,
+                    "session_id": session_id,
+                    "language": language,
+                    "model": current_model_manager.current_model_name,
                     "attempt": attempt + 1
                 }
             )
@@ -360,12 +385,14 @@ async def chat_endpoint(request: ChatRequest):
             if attempt < max_retries - 1:
                 # Try fallback
                 logger.info("🔄 Attempting model fallback...")
-                if model_manager.fallback_to_next_model():
+                if current_model_manager.fallback_to_next_model():
                     # Recreate session with new model
-                    chat_sessions[session_id] = model_manager.create_chat_session()
+                    chat_sessions[session_key] = current_model_manager.create_chat_session()
+                    current_chat_session = chat_sessions[session_key]
                     continue
             
-            raise HTTPException(status_code=504, detail="AI service timeout")
+            timeout_msg = "Samahani, nimechelewa kupata jibu. Tafadhali jaribu tena." if language == "sw" else "Sorry, I'm taking too long to respond. Please try again."
+            return ChatResponse(sender="bot", text=timeout_msg)
             
         except Exception as e:
             logger.error(f"⚠️ Error on attempt {attempt + 1}: {str(e)[:200]}")
@@ -375,8 +402,9 @@ async def chat_endpoint(request: ChatRequest):
                 logger.warning("💰 Quota exceeded, trying fallback model...")
                 
                 if attempt < max_retries - 1:
-                    if model_manager.fallback_to_next_model():
-                        chat_sessions[session_id] = model_manager.create_chat_session()
+                    if current_model_manager.fallback_to_next_model():
+                        chat_sessions[session_key] = current_model_manager.create_chat_session()
+                        current_chat_session = chat_sessions[session_key]
                         continue
             
             # If last attempt, return safe fallback
@@ -385,7 +413,11 @@ async def chat_endpoint(request: ChatRequest):
                 return ChatResponse(
                     sender="bot", 
                     text=fallback_text, 
-                    metadata={"error": str(e)[:100], "all_models_failed": True}
+                    metadata={
+                        "error": str(e)[:100], 
+                        "all_models_failed": True,
+                        "language": language
+                    }
                 )
 
 @app.get("/api/incidents")
@@ -416,36 +448,366 @@ async def get_incidents(db: Session = Depends(get_db)):
         logger.error(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/admin/reports/{report_id}/verify")
-async def verify_report(
-    report_id: int,
-    request: VerifyRequest,
-    db: Session = Depends(get_db)
-):
-    if request.action not in ["approve", "reject"]:
-        raise HTTPException(status_code=400, detail="Invalid action")
-    
-    try:
-        report = db.query(IncidentReport).filter(IncidentReport.id == report_id).first()
-        if not report:
-            raise HTTPException(status_code=404, detail="Not Found")
-        
-        report.status = "verified" if request.action == "approve" else "rejected"
-        db.commit()
-        return {"success": True, "status": report.status}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/health")
 async def health_check():
     """Health check endpoint with model status"""
+    active_sessions_info = {}
+    for session_key, model_mgr in session_model_managers.items():
+        active_sessions_info[session_key] = {
+            "language": model_mgr.language,
+            "model": model_mgr.current_model_name
+        }
+    
     return {
         "status": "healthy",
-        "active_model": model_manager.current_model_name,
+        "default_model": model_manager.current_model_name,
         "fallback_models": model_manager.model_priorities,
-        "sessions_active": len(chat_sessions)
+        "sessions_active": len(chat_sessions),
+        "active_sessions": active_sessions_info
     }
+
+# ... rest of your admin endpoints remain the same ...
+
+@app.get("/admin/reports/unverified")
+async def get_unverified_reports(
+    db: Session = Depends(get_db),
+    authenticated: bool = Depends(verify_admin_token)
+):
+    """Get all unverified reports for admin review"""
+    try:
+        reports = db.query(IncidentReport).filter(
+            IncidentReport.status == "unverified"
+        ).order_by(IncidentReport.timestamp.desc()).all()
+        
+        # Decrypt and format reports
+        formatted_reports = []
+        for report in reports:
+            try:
+                # Decrypt the sensitive data
+                decrypted_description = decrypt_text(report.incident_description_encrypted)
+                
+                formatted_reports.append({
+                    "id": report.id,
+                    "county": report.county,
+                    "type": report.incident_type,
+                    "story": decrypted_description,
+                    "timestamp": report.timestamp.isoformat(),
+                    "timeframe": report.timeframe,
+                    "relationship": report.relationship_type,
+                    "specific_area": report.specific_area,
+                    "support_needs": report.support_needs,
+                    "emotional_state": report.emotional_state
+                })
+            except Exception as e:
+                logger.error(f"Error processing report {report.id}: {e}")
+                continue
+        
+        return {"success": True, "data": formatted_reports, "total": len(formatted_reports)}
+        
+    except Exception as e:
+        logger.error(f"Error fetching unverified reports: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================
+# ADMIN DASHBOARD & ANALYTICS ENDPOINTS
+# ============================================================
+
+@app.get("/admin/dashboard")
+async def get_admin_dashboard(
+    db: Session = Depends(get_db),
+    authenticated: bool = Depends(verify_admin_token)
+):
+    """Comprehensive admin dashboard with analytics"""
+    try:
+        # Total counts
+        total_reports = db.query(IncidentReport).count()
+        unverified = db.query(IncidentReport).filter(IncidentReport.status == "unverified").count()
+        verified = db.query(IncidentReport).filter(IncidentReport.status == "verified").count()
+        rejected = db.query(IncidentReport).filter(IncidentReport.status == "rejected").count()
+        
+        # Recent reports (last 30 days)
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        recent_reports = db.query(IncidentReport).filter(
+            IncidentReport.timestamp >= thirty_days_ago
+        ).count()
+        
+        # Reports with mapping consent
+        mapping_consent_count = db.query(IncidentReport).filter(
+            IncidentReport.mapping_consent == True
+        ).count()
+        
+        # Get reports by type
+        from sqlalchemy import func
+        by_type = db.query(
+            IncidentReport.incident_type,
+            func.count(IncidentReport.id).label('count')
+        ).group_by(IncidentReport.incident_type).all()
+        
+        # Get reports by county
+        by_county = db.query(
+            IncidentReport.county,
+            func.count(IncidentReport.id).label('count')
+        ).group_by(IncidentReport.county).all()
+        
+        # Get reports by status
+        by_status = db.query(
+            IncidentReport.status,
+            func.count(IncidentReport.id).label('count')
+        ).group_by(IncidentReport.status).all()
+        
+        # Monthly trend (last 6 months)
+        six_months_ago = datetime.utcnow() - timedelta(days=180)
+        monthly_trend = db.query(
+            func.date_trunc('month', IncidentReport.timestamp).label('month'),
+            func.count(IncidentReport.id).label('count')
+        ).filter(
+            IncidentReport.timestamp >= six_months_ago
+        ).group_by('month').order_by('month').all()
+        
+        # Recent activity (last 10 reports)
+        recent_activity = db.query(IncidentReport).order_by(
+            IncidentReport.timestamp.desc()
+        ).limit(10).all()
+        
+        formatted_recent_activity = []
+        for report in recent_activity:
+            try:
+                decrypted_description = decrypt_text(report.incident_description_encrypted)
+                formatted_recent_activity.append({
+                    "id": report.id,
+                    "county": report.county,
+                    "type": report.incident_type,
+                    "status": report.status,
+                    "timestamp": report.timestamp.isoformat(),
+                    "preview": decrypted_description[:100] + "..." if len(decrypted_description) > 100 else decrypted_description
+                })
+            except Exception as e:
+                logger.error(f"Error processing recent activity report {report.id}: {e}")
+                continue
+        
+        return {
+            "success": True,
+            "data": {
+                "summary": {
+                    "total_reports": total_reports,
+                    "unverified": unverified,
+                    "verified": verified,
+                    "rejected": rejected,
+                    "recent_reports": recent_reports,
+                    "mapping_consent": mapping_consent_count,
+                    "verification_rate": round((verified / total_reports * 100), 2) if total_reports > 0 else 0
+                },
+                "analytics": {
+                    "by_type": {item[0]: item[1] for item in by_type},
+                    "by_county": {item[0]: item[1] for item in by_county},
+                    "by_status": {item[0]: item[1] for item in by_status},
+                    "monthly_trend": [
+                        {"month": item[0].strftime("%Y-%m"), "count": item[1]} 
+                        for item in monthly_trend
+                    ]
+                },
+                "recent_activity": formatted_recent_activity
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching admin dashboard: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/reports")
+async def get_all_reports(
+    page: int = 1,
+    limit: int = 20,
+    status: str = None,
+    county: str = None,
+    db: Session = Depends(get_db),
+    authenticated: bool = Depends(verify_admin_token)
+):
+    """Get all reports with pagination and filtering"""
+    try:
+        # Build query based on filters
+        query = db.query(IncidentReport)
+        
+        if status:
+            query = query.filter(IncidentReport.status == status)
+        if county:
+            query = query.filter(IncidentReport.county.ilike(f"%{county}%"))
+        
+        # Get total count for pagination
+        total = query.count()
+        
+        # Apply pagination
+        reports = query.order_by(
+            IncidentReport.timestamp.desc()
+        ).offset((page - 1) * limit).limit(limit).all()
+        
+        # Format reports
+        formatted_reports = []
+        for report in reports:
+            try:
+                decrypted_description = decrypt_text(report.incident_description_encrypted)
+                
+                formatted_reports.append({
+                    "id": report.id,
+                    "county": report.county,
+                    "specific_area": report.specific_area,
+                    "type": report.incident_type,
+                    "story": decrypted_description,
+                    "timestamp": report.timestamp.isoformat(),
+                    "timeframe": report.timeframe,
+                    "relationship": report.relationship_type,
+                    "support_needs": report.support_needs,
+                    "emotional_state": report.emotional_state,
+                    "status": report.status,
+                    "mapping_consent": report.mapping_consent,
+                    "latitude": report.latitude,
+                    "longitude": report.longitude
+                })
+            except Exception as e:
+                logger.error(f"Error processing report {report.id}: {e}")
+                continue
+        
+        return {
+            "success": True,
+            "data": {
+                "reports": formatted_reports,
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total": total,
+                    "pages": (total + limit - 1) // limit
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching all reports: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/analytics/geographic")
+async def get_geographic_analytics(
+    db: Session = Depends(get_db),
+    authenticated: bool = Depends(verify_admin_token)
+):
+    """Get geographic distribution of reports"""
+    try:
+        # Reports by county with coordinates
+        from sqlalchemy import func
+        
+        county_data = db.query(
+            IncidentReport.county,
+            func.count(IncidentReport.id).label('count'),
+            func.avg(IncidentReport.latitude).label('avg_lat'),
+            func.avg(IncidentReport.longitude).label('avg_lng')
+        ).filter(
+            IncidentReport.latitude.isnot(None),
+            IncidentReport.longitude.isnot(None),
+            IncidentReport.status == "verified"
+        ).group_by(IncidentReport.county).all()
+        
+        # Hotspot analysis - areas with most reports
+        hotspot_areas = db.query(
+            IncidentReport.specific_area,
+            IncidentReport.county,
+            func.count(IncidentReport.id).label('count'),
+            func.avg(IncidentReport.latitude).label('avg_lat'),
+            func.avg(IncidentReport.longitude).label('avg_lng')
+        ).filter(
+            IncidentReport.latitude.isnot(None),
+            IncidentReport.longitude.isnot(None),
+            IncidentReport.specific_area.isnot(None),
+            IncidentReport.status == "verified"
+        ).group_by(IncidentReport.specific_area, IncidentReport.county).order_by(
+            func.count(IncidentReport.id).desc()
+        ).limit(10).all()
+        
+        geographic_data = []
+        for county, count, avg_lat, avg_lng in county_data:
+            if avg_lat and avg_lng:
+                geographic_data.append({
+                    "county": county,
+                    "count": count,
+                    "latitude": float(avg_lat),
+                    "longitude": float(avg_lng)
+                })
+        
+        hotspot_data = []
+        for area, county, count, avg_lat, avg_lng in hotspot_areas:
+            if avg_lat and avg_lng:
+                hotspot_data.append({
+                    "area": area,
+                    "county": county,
+                    "count": count,
+                    "latitude": float(avg_lat),
+                    "longitude": float(avg_lng)
+                })
+        
+        return {
+            "success": True,
+            "data": {
+                "county_distribution": geographic_data,
+                "hotspots": hotspot_data
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching geographic analytics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/analytics/temporal")
+async def get_temporal_analytics(
+    db: Session = Depends(get_db),
+    authenticated: bool = Depends(verify_admin_token)
+):
+    """Get temporal analysis of reports"""
+    try:
+        from sqlalchemy import func, extract
+        
+        # Daily pattern (hour of day)
+        hourly_pattern = db.query(
+            extract('hour', IncidentReport.timestamp).label('hour'),
+            func.count(IncidentReport.id).label('count')
+        ).group_by('hour').order_by('hour').all()
+        
+        # Weekly pattern (day of week)
+        daily_pattern = db.query(
+            extract('dow', IncidentReport.timestamp).label('day_of_week'),
+            func.count(IncidentReport.id).label('count')
+        ).group_by('day_of_week').order_by('day_of_week').all()
+        
+        # Monthly trend (last 12 months)
+        one_year_ago = datetime.utcnow() - timedelta(days=365)
+        monthly_trend = db.query(
+            func.date_trunc('month', IncidentReport.timestamp).label('month'),
+            func.count(IncidentReport.id).label('count')
+        ).filter(
+            IncidentReport.timestamp >= one_year_ago
+        ).group_by('month').order_by('month').all()
+        
+        # Timeframe analysis
+        timeframe_analysis = db.query(
+            IncidentReport.timeframe,
+            func.count(IncidentReport.id).label('count')
+        ).filter(
+            IncidentReport.timeframe.isnot(None)
+        ).group_by(IncidentReport.timeframe).all()
+        
+        return {
+            "success": True,
+            "data": {
+                "hourly_pattern": [{"hour": int(item[0]), "count": item[1]} for item in hourly_pattern],
+                "daily_pattern": [{"day_of_week": int(item[0]), "count": item[1]} for item in daily_pattern],
+                "monthly_trend": [
+                    {"month": item[0].strftime("%Y-%m"), "count": item[1]} 
+                    for item in monthly_trend
+                ],
+                "timeframe_analysis": {item[0]: item[1] for item in timeframe_analysis}
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching temporal analytics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/admin/reports/unverified")
 async def get_unverified_reports(
@@ -695,7 +1057,7 @@ async def export_reports_csv(
         
     except Exception as e:
         logger.error(f"Error exporting CSV: {e}")
-        raise HTTPException(status_code=500, detail=str(e))            
+        raise HTTPException(status_code=500, detail=str(e))   
 
 if __name__ == "__main__":
     import uvicorn

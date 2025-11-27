@@ -29,7 +29,7 @@ export default function ChatLayout({
   children: React.ReactNode;
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true); // Start minimized
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false); // Start expanded on desktop
   const [menuOpen, setMenuOpen] = useState(false);
   const [language, setLanguage] = useState<'en' | 'sw'>('en');
   const [chats, setChats] = useState<Chat[]>([]);
@@ -60,7 +60,6 @@ export default function ChatLayout({
       if (savedChats) {
         try {
           const parsedChats = JSON.parse(savedChats);
-          // Convert timestamp strings back to Date objects
           const chatsWithDates = parsedChats.map((chat: any) => ({
             ...chat,
             timestamp: new Date(chat.timestamp),
@@ -71,7 +70,6 @@ export default function ChatLayout({
           }));
           setChats(chatsWithDates);
           
-          // Set active chat
           const active = chatsWithDates.find((c: Chat) => c.active);
           if (active) {
             setActiveChat(active);
@@ -90,14 +88,12 @@ export default function ChatLayout({
     }
   }, []);
 
-  // Save chats to localStorage whenever they change
   useEffect(() => {
     if (typeof window !== 'undefined' && chats.length > 0) {
       localStorage.setItem('vee_chats', JSON.stringify(chats));
     }
   }, [chats]);
 
-  // Save language preference
   useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('vee_language', language);
@@ -269,78 +265,80 @@ export default function ChatLayout({
   };
 
   return (
-    <main className="relative h-screen w-full overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50">
-      {/* Minimalist Header with Hamburger */}
-      <header className="fixed top-0 left-0 w-full z-50 bg-white/80 backdrop-blur-xl border-b border-gray-200/50 shadow-sm">
-        <div className="flex items-center justify-between px-4 py-3">
+    <main className="relative h-screen w-full overflow-hidden bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50">
+      {/* Elegant Header */}
+      <header className="fixed top-0 left-0 w-full z-50 bg-white/70 backdrop-blur-xl border-b border-purple-100/50 shadow-sm">
+        <div className="flex items-center justify-between px-6 py-3">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2">
+          <Link href="/" className="flex items-center gap-3">
             <Image 
               src="/logo.png" 
               alt="Vee" 
-              width={32} 
-              height={32} 
-              className="rounded-full shadow-sm" 
+              width={36} 
+              height={36} 
+              className="rounded-full shadow-md" 
             />
-            <span className="font-semibold text-gray-800 hidden sm:inline">Vee</span>
+            <span className="font-bold text-lg bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent hidden sm:inline">
+              Vee
+            </span>
           </Link>
 
           {/* Center - Language Toggle */}
           <button
             onClick={toggleLanguage}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 hover:bg-blue-100 transition text-blue-700 text-sm font-medium"
+            className="flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-purple-100 to-pink-100 hover:from-purple-200 hover:to-pink-200 transition text-purple-700 text-sm font-medium shadow-sm"
           >
-            <Globe size={14} />
+            <Globe size={16} />
             {language === 'en' ? 'English' : 'Kiswahili'}
           </button>
 
           {/* Hamburger Menu */}
           <button
             onClick={() => setMenuOpen(!menuOpen)}
-            className="p-2 rounded-lg hover:bg-gray-100 transition"
+            className="p-2 rounded-lg hover:bg-purple-100 transition"
           >
-            <Menu size={20} className="text-gray-700" />
+            <Menu size={22} className="text-purple-700" />
           </button>
         </div>
 
         {/* Dropdown Menu */}
         {menuOpen && (
-          <div className="absolute right-4 top-16 bg-white rounded-xl shadow-xl border border-gray-200 py-2 w-48 animate-in slide-in-from-top-2">
+          <div className="absolute right-6 top-16 bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-purple-100 py-2 w-56 animate-in slide-in-from-top-2">
             <Link 
               href="/resources" 
               onClick={() => setMenuOpen(false)}
-              className="flex items-center gap-2 px-4 py-2 hover:bg-gray-50 transition text-gray-700 text-sm"
+              className="flex items-center gap-3 px-4 py-3 hover:bg-purple-50 transition text-gray-700 text-sm"
             >
-              <FileText size={16} />
+              <FileText size={18} className="text-purple-600" />
               {language === 'sw' ? 'Rasilimali' : 'Resources'}
             </Link>
             <Link 
               href="/map"
               onClick={() => setMenuOpen(false)}
-              className="flex items-center gap-2 px-4 py-2 hover:bg-gray-50 transition text-gray-700 text-sm"
+              className="flex items-center gap-3 px-4 py-3 hover:bg-purple-50 transition text-gray-700 text-sm"
             >
-              <Shield size={16} />
+              <Shield size={18} className="text-purple-600" />
               {language === 'sw' ? 'Ramani' : 'Map Insights'}
             </Link>
             <button
               onClick={handleSafeExit}
-              className="w-full flex items-center gap-2 px-4 py-2 hover:bg-red-50 transition text-red-600 text-sm"
+              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-50 transition text-red-600 text-sm"
             >
-              <Shield size={16} />
+              <Shield size={18} />
               {language === 'sw' ? 'Toka Salama' : 'Safe Exit'}
             </button>
           </div>
         )}
       </header>
 
-      <div className="flex h-full pt-14">
-        {/* Sidebar */}
+      <div className="flex h-full pt-16">
+        {/* Sidebar - Light Pastel Colors */}
         <div 
           className={`${
             sidebarOpen ? 'translate-x-0' : '-translate-x-full'
           } ${
-            sidebarCollapsed ? 'w-16' : 'w-80'
-          } lg:translate-x-0 transition-all duration-300 fixed lg:relative z-40 h-full bg-white/90 backdrop-blur-xl border-r border-gray-200`}
+            sidebarCollapsed ? 'w-20' : 'w-80'
+          } lg:translate-x-0 transition-all duration-300 fixed lg:relative z-40 h-full bg-gradient-to-b from-purple-50/95 to-pink-50/95 backdrop-blur-xl border-r border-purple-100 shadow-lg`}
         >
           <ChatSidebar 
             chats={chats} 
@@ -354,10 +352,10 @@ export default function ChatLayout({
           />
         </div>
 
-        {/* Chat Area */}
-        <div className="flex-1 flex w-full bg-gradient-to-br from-white to-blue-50/30">
-          <div className="w-full h-full flex justify-center p-4">
-            <div className="bg-white/70 backdrop-blur-md border border-gray-200 rounded-2xl shadow-lg w-full max-w-5xl h-full overflow-hidden">
+        {/* Chat Area - Soft Gradient Background */}
+        <div className="flex-1 flex w-full bg-gradient-to-br from-white via-purple-50/30 to-pink-50/30">
+          <div className="w-full h-full flex justify-center items-center p-6">
+            <div className="bg-white/80 backdrop-blur-lg border border-purple-100 rounded-3xl shadow-2xl w-full max-w-6xl h-full overflow-hidden">
               {activeChat ? (
                 <ChatWindow 
                   activeChat={activeChat} 
@@ -367,14 +365,28 @@ export default function ChatLayout({
                   language={language}
                 />
               ) : (
-                <div className="h-full flex items-center justify-center">
-                  <div className="text-center">
-                    <p className="mb-4 text-gray-600">
-                      {language === 'sw' ? 'Anza mazungumzo kuanza.' : 'Start a new conversation to begin.'}
+                <div className="h-full flex items-center justify-center bg-gradient-to-br from-purple-50 to-pink-50">
+                  <div className="text-center p-8">
+                    <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-gradient-to-r from-purple-200 to-pink-200 flex items-center justify-center">
+                      <Image 
+                        src="/logo.png" 
+                        alt="Vee" 
+                        width={48} 
+                        height={48} 
+                        className="rounded-full"
+                      />
+                    </div>
+                    <h3 className="text-xl font-semibold text-gray-800 mb-2">
+                      {language === 'sw' ? 'Karibu Vee' : 'Welcome to Vee'}
+                    </h3>
+                    <p className="mb-6 text-gray-600 max-w-md mx-auto">
+                      {language === 'sw' 
+                        ? 'Anza mazungumzo kuanza. Uko salama hapa.' 
+                        : 'Start a new conversation to begin. You are safe here.'}
                     </p>
                     <button 
                       onClick={handleNewChat} 
-                      className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white px-6 py-3 rounded-full transition shadow-md"
+                      className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-8 py-3 rounded-full transition shadow-lg hover:shadow-xl font-medium"
                     >
                       {language === 'sw' ? 'Anza Mazungumzo' : 'Start New Chat'}
                     </button>
@@ -386,22 +398,30 @@ export default function ChatLayout({
         </div>
       </div>
 
-      {/* Compact Quick Exit Button */}
+      {/* Elegant Quick Exit Button */}
       <button 
         onClick={handleSafeExit} 
-        className="fixed bottom-4 right-4 bg-gradient-to-r from-red-500 to-pink-500 text-white p-3 rounded-full shadow-lg z-50 hover:shadow-xl transition-all hover:scale-110 group"
+        className="fixed bottom-6 right-6 bg-gradient-to-r from-red-400 to-pink-400 text-white p-4 rounded-full shadow-2xl z-50 hover:shadow-red-300/50 transition-all hover:scale-110 group"
         title={language === 'sw' ? 'Toka Salama' : 'Quick Exit'}
       >
-        <XCircle size={18} className="group-hover:rotate-90 transition-transform" />
+        <XCircle size={20} className="group-hover:rotate-90 transition-transform" />
       </button>
 
       {/* Mobile Sidebar Toggle */}
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="lg:hidden fixed bottom-20 right-4 bg-blue-500 text-white p-3 rounded-full shadow-lg z-50 hover:bg-blue-600 transition"
+        className="lg:hidden fixed bottom-24 right-6 bg-gradient-to-r from-purple-500 to-pink-500 text-white p-3 rounded-full shadow-2xl z-50 hover:shadow-purple-300/50 transition-all hover:scale-110"
       >
-        <Menu size={18} />
+        <Menu size={20} />
       </button>
+
+      {/* Overlay for mobile sidebar */}
+      {sidebarOpen && (
+        <div 
+          className="lg:hidden fixed inset-0 bg-black/20 backdrop-blur-sm z-30"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
     </main>
   );
 }

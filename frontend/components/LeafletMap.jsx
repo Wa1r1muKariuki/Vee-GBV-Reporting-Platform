@@ -11,7 +11,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
 });
 
-// Custom icons for different incident types (Keep this object defined here)
+// Custom icons for different incident types
 const incidentIcons = {
   physical_violence: new L.Icon({
     iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
@@ -45,7 +45,6 @@ const incidentIcons = {
   })
 };
 
-// --- FIX: Add the default export ---
 export default function LeafletMap({ reports = [] }) { 
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
@@ -57,8 +56,9 @@ export default function LeafletMap({ reports = [] }) {
     // Initialize map centered on Kenya
     const map = L.map(mapRef.current).setView([-1.286389, 36.817223], 7); 
     
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+    // LIGHT MODE tile layer
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       maxZoom: 18,
     }).addTo(map);
 
@@ -127,5 +127,5 @@ export default function LeafletMap({ reports = [] }) {
 
   }, [reports]);
 
-  return <div ref={mapRef} className="w-full h-full z-0 bg-slate-900" />;
+  return <div ref={mapRef} className="w-full h-full z-0 bg-slate-100" />;
 }

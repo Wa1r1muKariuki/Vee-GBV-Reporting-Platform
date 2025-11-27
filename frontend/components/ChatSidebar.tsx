@@ -20,7 +20,7 @@ interface ChatSidebarProps {
   onSetActiveChat: (id: number) => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
-  language: "en" | "sw"; // Add this line
+  language: "en" | "sw";
 }
 
 export default function ChatSidebar({ 
@@ -31,7 +31,7 @@ export default function ChatSidebar({
   onSetActiveChat,
   collapsed,
   onToggleCollapse,
-  language // Add this prop
+  language
 }: ChatSidebarProps) {
   const formatTime = (date: Date) => {
     const now = new Date();
@@ -43,49 +43,48 @@ export default function ChatSidebar({
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  // Update the text content based on language
   const getText = (english: string, swahili: string) => {
     return language === 'sw' ? swahili : english;
   };
 
   return (
     <aside className={`h-full flex flex-col transition-all duration-300 ${
-      collapsed ? 'w-16' : 'w-80'
+      collapsed ? 'w-20' : 'w-80'
     }`}>
       {/* Header */}
-      <div className="p-4 border-b border-white/10 relative">
+      <div className="p-4 border-b border-purple-100 relative bg-gradient-to-r from-purple-50 to-pink-50">
         {!collapsed ? (
           <div>
-            <h1 className="text-lg font-bold text-white">
+            <h1 className="text-lg font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
               {getText('Chat History', 'Historia ya Mazungumzo')}
             </h1>
-            <p className="text-xs text-gray-300 mt-0.5">
+            <p className="text-xs text-purple-600/70 mt-1">
               {getText('Saved chats preserved', 'Mazungumzo yaliyohifadhiwa')}
             </p>
           </div>
         ) : (
           <div className="flex justify-center">
-            <MessageSquare size={20} className="text-white" />
+            <MessageSquare size={20} className="text-purple-600" />
           </div>
         )}
         
         {/* Collapse Toggle */}
         <button
           onClick={onToggleCollapse}
-          className="absolute -right-2 top-1/2 transform -translate-y-1/2 bg-black/60 backdrop-blur-lg border border-white/20 rounded-xl p-1 shadow-2xl hover:shadow-xl transition-all hover:scale-110 hidden lg:block"
+          className="absolute -right-3 top-1/2 transform -translate-y-1/2 bg-white border border-purple-200 rounded-full p-1.5 shadow-lg hover:shadow-xl transition-all hover:scale-110 hidden lg:block"
         >
           {collapsed ? 
-            <ChevronRight size={12} className="text-white" /> : 
-            <ChevronLeft size={12} className="text-white" />
+            <ChevronRight size={14} className="text-purple-600" /> : 
+            <ChevronLeft size={14} className="text-purple-600" />
           }
         </button>
       </div>
       
       {/* New Chat Button */}
-      <div className="p-3 border-b border-white/10">
+      <div className="p-3 border-b border-purple-100">
         <button 
           onClick={onNewChat}
-          className={`w-full flex items-center justify-center gap-2 bg-gradient-to-r from-teal-500 to-green-500 text-white py-2.5 rounded-xl font-semibold hover:scale-105 transition-all shadow-lg hover:shadow-teal-500/25 text-sm ${
+          className={`w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white py-2.5 rounded-xl font-semibold hover:scale-105 transition-all shadow-md hover:shadow-lg text-sm ${
             collapsed ? 'px-2' : 'px-3'
           }`}
         >
@@ -95,11 +94,11 @@ export default function ChatSidebar({
       </div>
 
       {/* Scrollable Area */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto bg-gradient-to-b from-purple-50/30 to-transparent">
         {/* Chats List */}
         {!collapsed && chats.length > 0 && (
           <div className="p-3">
-            <ul className="space-y-1.5">
+            <ul className="space-y-2">
               {chats.map((chat) => (
                 <ChatSessionItem 
                   key={chat.id}
@@ -125,15 +124,15 @@ export default function ChatSidebar({
                 onClick={() => onSetActiveChat(chat.id)}
                 className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all group relative ${
                   chat.active 
-                    ? "bg-gradient-to-r from-teal-500 to-green-500 text-white shadow-lg" 
-                    : "bg-white/10 text-gray-300 hover:bg-white/20"
+                    ? "bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg" 
+                    : "bg-white/60 text-purple-400 hover:bg-purple-100 border border-purple-200"
                 }`}
                 title={chat.title}
               >
                 <MessageSquare size={16} />
                 {chat.saved && (
-                  <div className="absolute -top-0.5 -right-0.5">
-                    <BookmarkCheck size={10} className="text-teal-400" />
+                  <div className="absolute -top-1 -right-1">
+                    <BookmarkCheck size={12} className="text-purple-600" />
                   </div>
                 )}
               </button>
@@ -143,12 +142,14 @@ export default function ChatSidebar({
 
         {/* Empty State */}
         {!collapsed && chats.length === 0 && (
-          <div className="text-center py-8 px-4 text-gray-400">
-            <MessageSquare size={32} className="mx-auto mb-3 opacity-50" />
-            <p className="text-xs font-medium text-gray-300 mb-1">
+          <div className="text-center py-12 px-4">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-r from-purple-100 to-pink-100 flex items-center justify-center">
+              <MessageSquare size={28} className="text-purple-400" />
+            </div>
+            <p className="text-sm font-medium text-gray-700 mb-1">
               {getText('No conversations', 'Hakuna mazungumzo')}
             </p>
-            <p className="text-xs">
+            <p className="text-xs text-gray-500">
               {getText('Start a new chat', 'Anza mazungumzo mapya')}
             </p>
           </div>
@@ -156,18 +157,18 @@ export default function ChatSidebar({
       </div>
 
       {/* Footer */}
-      <div className="p-3 border-t border-white/10 bg-black/20">
+      <div className="p-3 border-t border-purple-100 bg-gradient-to-r from-purple-50 to-pink-50">
         {!collapsed ? (
-          <div className="text-xs text-gray-400 text-center">
-            <div className="flex items-center justify-center gap-1.5 mb-1">
-              <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
-              {getText('Encrypted & Anonymous', 'Imesimbwa na Bila Kukutambulisha')}
+          <div className="text-xs text-purple-600/80 text-center">
+            <div className="flex items-center justify-center gap-2 mb-1">
+              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-sm"></div>
+              <span className="font-medium">{getText('Encrypted & Anonymous', 'Imesimbwa na Bila Kukutambulisha')}</span>
             </div>
-            <p className="text-xs">{getText('Privacy protected', 'Faragha imelindwa')}</p>
+            <p className="text-xs text-purple-500/60">{getText('Privacy protected', 'Faragha imelindwa')}</p>
           </div>
         ) : (
           <div className="flex justify-center">
-            <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
+            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
           </div>
         )}
       </div>
@@ -204,26 +205,26 @@ function ChatSessionItem({
         onClick={() => onActivate(chat.id)}
         className={`w-full text-left p-3 rounded-xl transition-all group border ${
           chat.active 
-            ? "bg-gradient-to-r from-teal-500/20 to-green-500/20 border-teal-500/30 shadow-lg" 
-            : "bg-white/5 border-transparent hover:border-white/10 hover:bg-white/10"
+            ? "bg-gradient-to-r from-purple-100 to-pink-100 border-purple-300 shadow-md" 
+            : "bg-white/60 border-purple-100 hover:border-purple-300 hover:bg-purple-50/50 hover:shadow-sm"
         }`}
       >
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1.5">
               <MessageSquare size={14} className={`flex-shrink-0 ${
-                chat.active ? "text-teal-400" : "text-gray-400"
+                chat.active ? "text-purple-600" : "text-purple-400"
               }`} />
               <span className={`text-sm font-medium truncate ${
-                chat.active ? "text-white" : "text-gray-300"
+                chat.active ? "text-purple-900" : "text-gray-700"
               }`}>
                 {chat.title}
               </span>
             </div>
-            <p className="text-xs text-gray-400 truncate mb-1.5 leading-relaxed">
+            <p className="text-xs text-gray-600 truncate mb-1.5 leading-relaxed">
               {chat.preview}
             </p>
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-purple-500/70">
               {formatTime(chat.timestamp)}
             </div>
           </div>
@@ -234,24 +235,24 @@ function ChatSessionItem({
                 e.stopPropagation();
                 onSave(chat.id);
               }}
-              className={`p-1 rounded-lg transition ${
+              className={`p-1.5 rounded-lg transition ${
                 chat.saved 
-                  ? "text-teal-400 hover:text-teal-300 bg-teal-400/10" 
-                  : "text-gray-400 hover:text-gray-300 hover:bg-white/10"
+                  ? "text-purple-600 hover:text-purple-700 bg-purple-100" 
+                  : "text-gray-400 hover:text-purple-600 hover:bg-purple-50"
               }`}
               title={chat.saved ? getText('Unsave chat', 'Futa uhifadhi') : getText('Save chat', 'Hifadhi mazungumzo')}
             >
-              {chat.saved ? <BookmarkCheck size={12} /> : <Bookmark size={12} />}
+              {chat.saved ? <BookmarkCheck size={14} /> : <Bookmark size={14} />}
             </button>
             <button 
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete(chat.id);
               }}
-              className="p-1 text-gray-400 hover:text-red-400 hover:bg-red-400/10 transition rounded-lg"
+              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 transition rounded-lg"
               title={getText('Delete chat', 'Futa mazungumzo')}
             >
-              <Trash2 size={12} />
+              <Trash2 size={14} />
             </button>
           </div>
         </div>

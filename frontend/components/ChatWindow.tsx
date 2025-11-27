@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Loader2, User, Bot } from "lucide-react";
+import { Send, Loader2, User, Bot, Sparkles } from "lucide-react";
 
 interface ChatMessage {
   sender: string;
@@ -53,7 +53,8 @@ export default function ChatWindow({
       typeMessage: "Type your message...",
       send: "Send",
       typing: "Vee is typing...",
-      saved: "Saved"
+      saved: "Saved",
+      listening: "I'm here to listen and provide support"
     },
     sw: {
       messages: "ujumbe",
@@ -61,7 +62,8 @@ export default function ChatWindow({
       typeMessage: "Andika ujumbe wako...",
       send: "Tuma",
       typing: "Vee anaandika...",
-      saved: "Imehifadhiwa"
+      saved: "Imehifadhiwa",
+      listening: "Niko hapa kukusikiliza na kukupa msaada"
     }
   };
 
@@ -76,7 +78,6 @@ export default function ChatWindow({
       timestamp: new Date()
     };
 
-    // Update chat with user message
     const updatedMessages = [...activeChat.messages, userMessage];
     onUpdateChat(activeChat.id, updatedMessages);
     
@@ -84,7 +85,6 @@ export default function ChatWindow({
     setIsLoading(true);
 
     try {
-      // Get bot response
       const botResponse = await onSendMessage(inputMessage.trim());
       
       const botMessage: ChatMessage = {
@@ -93,7 +93,6 @@ export default function ChatWindow({
         timestamp: new Date()
       };
 
-      // Update chat with bot response
       const finalMessages = [...updatedMessages, botMessage];
       onUpdateChat(activeChat.id, finalMessages);
     } catch (error) {
@@ -120,70 +119,80 @@ export default function ChatWindow({
   };
 
   return (
-    <div className={`h-full flex flex-col transition-all duration-300 ${
-      sidebarCollapsed ? 'lg:ml-0' : 'lg:ml-0'
-    }`}>
+    <div className="h-full flex flex-col bg-gradient-to-br from-purple-50/30 to-pink-50/30">
       {/* Chat Header */}
-      <div className="p-4 border-b border-gray-200 bg-white/80 backdrop-blur-sm">
+      <div className="px-6 py-4 border-b border-purple-100 bg-white/70 backdrop-blur-sm">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-gray-800">{activeChat.title}</h2>
-            <p className="text-xs text-gray-500">
-              {activeChat.messages.length - 1} {t.messages}
+            <h2 className="text-lg font-semibold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+              {activeChat.title}
+            </h2>
+            <p className="text-xs text-purple-500/70 flex items-center gap-1.5">
+              <span>{activeChat.messages.length - 1} {t.messages}</span>
+              {activeChat.saved && (
+                <>
+                  <span>•</span>
+                  <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                    {t.saved}
+                  </span>
+                </>
+              )}
             </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {activeChat.saved && (
-              <span className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded-full">
-                {t.saved}
-              </span>
-            )}
           </div>
         </div>
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 bg-gray-50/30">
+      <div className="flex-1 overflow-y-auto px-6 py-6 bg-gradient-to-br from-white/50 to-purple-50/30">
         {activeChat.messages.length === 0 ? (
           <div className="h-full flex items-center justify-center">
-            <div className="text-center text-gray-500">
-              <Bot size={48} className="mx-auto mb-4 text-gray-300" />
-              <p className="text-lg font-medium text-gray-600">{t.emptyChat}</p>
-              <p className="text-sm text-gray-400 mt-2">
-                {language === 'sw' 
-                  ? "Niko hapa kukusikiliza na kukupa msaada" 
-                  : "I'm here to listen and provide support"}
+            <div className="text-center max-w-md">
+              <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-gradient-to-r from-purple-200 to-pink-200 flex items-center justify-center shadow-lg">
+                <Bot size={36} className="text-purple-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-800 mb-2">{t.emptyChat}</h3>
+              <p className="text-sm text-gray-600">
+                {t.listening}
               </p>
             </div>
           </div>
         ) : (
-          <div className="space-y-4 max-w-4xl mx-auto">
+          <div className="space-y-6 max-w-4xl mx-auto">
             {activeChat.messages.map((message, index) => (
               <div
                 key={index}
-                className={`flex gap-3 ${
+                className={`flex gap-3 items-start ${
                   message.sender === "user" ? "flex-row-reverse" : "flex-row"
                 }`}
               >
+                {/* Avatar */}
                 <div
-                  className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+                  className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center shadow-md ${
                     message.sender === "user" 
-                      ? "bg-blue-500 text-white" 
-                      : "bg-purple-500 text-white"
+                      ? "bg-gradient-to-r from-blue-400 to-indigo-400" 
+                      : "bg-gradient-to-r from-purple-400 to-pink-400"
                   }`}
                 >
-                  {message.sender === "user" ? <User size={16} /> : <Bot size={16} />}
+                  {message.sender === "user" ? (
+                    <User size={18} className="text-white" />
+                  ) : (
+                    <Bot size={18} className="text-white" />
+                  )}
                 </div>
+
+                {/* Message Bubble */}
                 <div
-                  className={`max-w-[70%] rounded-2xl px-4 py-2 ${
+                  className={`max-w-[75%] rounded-2xl px-5 py-3 shadow-md ${
                     message.sender === "user"
-                      ? "bg-blue-500 text-white rounded-br-none"
-                      : "bg-white text-gray-800 border border-gray-200 rounded-bl-none shadow-sm"
+                      ? "bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-br-sm"
+                      : "bg-white border border-purple-100 text-gray-800 rounded-bl-sm"
                   }`}
                 >
-                  <p className="text-sm whitespace-pre-wrap">{message.text}</p>
-                  <p className={`text-xs mt-1 ${
-                    message.sender === "user" ? "text-blue-100" : "text-gray-500"
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                    {message.text}
+                  </p>
+                  <p className={`text-xs mt-2 flex items-center gap-1 ${
+                    message.sender === "user" ? "text-blue-100" : "text-purple-400"
                   }`}>
                     {message.timestamp.toLocaleTimeString([], { 
                       hour: '2-digit', 
@@ -193,35 +202,43 @@ export default function ChatWindow({
                 </div>
               </div>
             ))}
+
+            {/* Typing Indicator */}
             {isLoading && (
-              <div className="flex gap-3">
-                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-purple-500 text-white flex items-center justify-center">
-                  <Bot size={16} />
+              <div className="flex gap-3 items-start">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-r from-purple-400 to-pink-400 flex items-center justify-center shadow-md">
+                  <Bot size={18} className="text-white" />
                 </div>
-                <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-none px-4 py-2 shadow-sm">
-                  <div className="flex items-center gap-1 text-sm text-gray-600">
+                <div className="bg-white border border-purple-100 rounded-2xl rounded-bl-sm px-5 py-3 shadow-md">
+                  <div className="flex items-center gap-2 text-sm text-purple-600">
                     <Loader2 size={16} className="animate-spin" />
-                    {t.typing}
+                    <span>{t.typing}</span>
+                    <div className="flex gap-1">
+                      <div className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                      <div className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                      <div className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                    </div>
                   </div>
                 </div>
               </div>
             )}
+            
             <div ref={messagesEndRef} />
           </div>
         )}
       </div>
 
       {/* Input Area */}
-      <div className="p-4 border-t border-gray-200 bg-white/80 backdrop-blur-sm">
+      <div className="px-6 py-4 border-t border-purple-100 bg-white/70 backdrop-blur-sm">
         <div className="max-w-4xl mx-auto">
-          <div className="flex gap-2">
+          <div className="flex gap-3">
             <div className="flex-1 relative">
               <textarea
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
                 placeholder={t.typeMessage}
-                className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                className="w-full px-4 py-3 border border-purple-200 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent bg-white/90 text-gray-800 placeholder-purple-300"
                 rows={1}
                 style={{
                   minHeight: "48px",
@@ -237,17 +254,18 @@ export default function ChatWindow({
             <button
               onClick={handleSendMessage}
               disabled={!inputMessage.trim() || isLoading}
-              className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-2xl font-medium hover:from-blue-600 hover:to-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md flex items-center gap-2"
+              className="px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 disabled:from-gray-300 disabled:to-gray-400 text-white rounded-2xl font-medium disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center gap-2"
             >
               {isLoading ? (
-                <Loader2 size={16} className="animate-spin" />
+                <Loader2 size={18} className="animate-spin" />
               ) : (
-                <Send size={16} />
+                <Send size={18} />
               )}
               <span className="hidden sm:inline">{t.send}</span>
             </button>
           </div>
-          <p className="text-xs text-gray-500 text-center mt-2">
+          <p className="text-xs text-purple-500/60 text-center mt-2 flex items-center justify-center gap-1">
+            <Sparkles size={12} />
             {language === 'sw' 
               ? "Bonyeza Enter kutuma, Shift+Enter kwa mstari mpya" 
               : "Press Enter to send, Shift+Enter for new line"}
